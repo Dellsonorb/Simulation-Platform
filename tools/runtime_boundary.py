@@ -143,6 +143,58 @@ def _strip_block_comments(text, opening, closing):
     return "".join(characters)
 
 
+def _strip_jinja_block_comments(text, opening, closing):
+    """Blank template comments while preserving delimiters in Jinja strings."""
+    characters = list(text)
+    cursor = 0
+    code_closer = None
+    quote = None
+    while cursor < len(text):
+        character = text[cursor]
+        if code_closer is not None:
+            if quote is not None:
+                if character == "\\":
+                    cursor += 2
+                    continue
+                if character == quote:
+                    quote = None
+                cursor += 1
+                continue
+            if character in ("'", '"'):
+                quote = character
+                cursor += 1
+                continue
+            if text.startswith(code_closer, cursor):
+                cursor += len(code_closer)
+                code_closer = None
+                continue
+            if text.startswith(opening, cursor):
+                stop = text.find(closing, cursor + len(opening))
+                end = len(text) if stop < 0 else stop + len(closing)
+                _blank_range(characters, cursor, end)
+                cursor = end
+                continue
+            cursor += 1
+            continue
+
+        if text.startswith("{{", cursor):
+            code_closer = "}}"
+            cursor += 2
+            continue
+        if text.startswith("{%", cursor):
+            code_closer = "%}"
+            cursor += 2
+            continue
+        if text.startswith(opening, cursor):
+            stop = text.find(closing, cursor + len(opening))
+            end = len(text) if stop < 0 else stop + len(closing)
+            _blank_range(characters, cursor, end)
+            cursor = end
+            continue
+        cursor += 1
+    return "".join(characters)
+
+
 def _strip_c_comments(text):
     characters = list(text)
     cursor = 0
@@ -239,8 +291,9 @@ def strip_comments(path, text):
     path = Path(path)
     suffix = path.suffix.lower()
     if suffix == ".jinja":
-        return _strip_block_comments(
-            _strip_block_comments(text, "<!--", "-->"), "{#", "#}")
+        return _strip_jinja_block_comments(
+            _strip_jinja_block_comments(text, "<!--", "-->"),
+            "{#", "#}")
     if suffix in {".launch", ".xml", ".xacro", ".urdf", ".sdf",
                   ".world", ".config"}:
         return _strip_block_comments(text, "<!--", "-->")
@@ -471,6 +524,13 @@ def validate_startup_spawns(root, joint_candidates=None,
     counts = Counter(identity for identity, _line in entries)
     lines = {identity: line for identity, line in entries}
 
+    overlaps = ((joint & standalone) | (joint & inactive) |
+                (standalone & inactive))
+    for path, name in overlaps:
+        findings.add(Finding(
+            path, lines.get((path, name), 0),
+            "startup-spawn:classification-overlap:%s" % name))
+
     for identity, count in counts.items():
         path, name = identity
         if identity not in expected:
@@ -589,6 +649,47 @@ def scan_removed_references(root, removed_paths):
     return tuple(sorted(findings))
 
 
+def _is_string_list(value):
+    return (isinstance(value, list) and
+            all(isinstance(item, str) for item in value))
+
+
+def _valid_manifest_boundary_schema(manifest):
+    if not isinstance(manifest, dict):
+        return False
+    packages = manifest.get("packages")
+    forbidden = manifest.get("forbidden")
+    if not isinstance(packages, dict) or not isinstance(forbidden, dict):
+        return False
+    if not _is_string_list(forbidden.get("package_names")):
+        return False
+    if not _is_string_list(forbidden.get("runtime_tokens")):
+        return False
+    for name, item in packages.items():
+        if not isinstance(name, str) or not name or not isinstance(item, dict):
+            return False
+        if not isinstance(item.get("imported"), bool):
+            return False
+        destination = item.get("destination")
+        if not isinstance(destination, str) or not destination:
+            return False
+    return True
+
+
+def _valid_overlay_boundary_schema(overlay):
+    if not isinstance(overlay, dict):
+        return False
+    removed = overlay.get("removed")
+    if not _is_string_list(removed):
+        return False
+    for item in removed:
+        path = Path(item)
+        if (not item or path.is_absolute() or
+                any(part in ("", ".", "..") for part in path.parts)):
+            return False
+    return True
+
+
 def validate_repository(root):
     root = Path(root)
     manifest_path = root / "config/runtime_sources.json"
@@ -604,6 +705,13 @@ def validate_repository(root):
     except (OSError, UnicodeDecodeError, ValueError):
         return (Finding("config/runtime_overlay.json", 0,
                         "boundary:overlay-unreadable"),)
+
+    if not _valid_manifest_boundary_schema(manifest):
+        return (Finding("config/runtime_sources.json", 0,
+                        "boundary:manifest-schema"),)
+    if not _valid_overlay_boundary_schema(overlay):
+        return (Finding("config/runtime_overlay.json", 0,
+                        "boundary:overlay-schema"),)
 
     expected_packages = {
         name: item["destination"]

@@ -25,6 +25,51 @@ from tools.runtime_boundary import (
 
 ROOT = Path(__file__).resolve().parents[1]
 
+EXPECTED_ACTIVE_TEXT_NAMES = frozenset({"CMakeLists.txt"})
+EXPECTED_ACTIVE_TEXT_SUFFIXES = frozenset({
+    ".cmake",
+    ".launch", ".xml", ".xacro", ".urdf", ".sdf", ".world",
+    ".jinja", ".config",
+    ".py", ".cpp", ".cc", ".c", ".hpp", ".hh", ".h",
+    ".yaml", ".yml", ".json", ".rviz",
+    ".msg", ".srv", ".action",
+    ".bash", ".sh",
+})
+EXPECTED_DYNAMIC_LIFECYCLE_TOKENS = (
+    "/gazebo/delete_model",
+    "DeleteModel",
+    "SpawnModel",
+    "/gazebo/spawn_urdf_model",
+    "/gazebo/spawn_sdf_model",
+    "respawn_model",
+    "delete_respawn",
+)
+EXPECTED_JOINT_CANDIDATE_SPAWNS = frozenset({
+    ("src/p450/prometheus_gazebo/launch_basic/sitl_px4_outdoor.launch",
+     "$(arg vehicle)_$(arg uav_id)_spawn"),
+    ("src/ground/bunker_aubo_gazebo/launch/combined_robot.launch",
+     "spawn_bunker_aubo"),
+    ("src/ground/bunker_aubo_gazebo/launch/combined_robot.launch",
+     "spawn_bunker_aubo_startup_pose"),
+})
+EXPECTED_STANDALONE_SMOKE_SPAWNS = frozenset({
+    ("src/ground/bunker_aubo_gazebo/launch/ag95_only.launch", "spawn_ag95"),
+    ("src/ground/bunker_aubo_gazebo/launch/aubo_only.launch", "spawn_aubo_i5"),
+    ("src/ground/bunker_aubo_gazebo/launch/bunker_only.launch", "spawn_bunker"),
+})
+EXPECTED_INACTIVE_LEGACY_SPAWNS = frozenset({
+    ("src/ground/bunker_aubo_gazebo/launch/brick_world.launch", "spawn_brick"),
+    ("src/ground/ground_pick_orchestrator/launch/ground_pick_demo.launch",
+     "spawn_ground_pick_brick"),
+    ("src/ground/ground_pick_orchestrator/launch/ground_pick_demo.launch",
+     "spawn_ground_pick_obstacle"),
+    ("src/p450/prometheus_gazebo/launch_basic/sitl_px4_indoor.launch",
+     "$(arg vehicle)_$(arg uav_id)_spawn"),
+    ("src/vendor/aubo_description/launch/gazebo.launch", "spawn_gazebo_model"),
+    ("src/vendor/dh_ag95_description/launch/gazebo.launch",
+     "spawn_gazebo_model"),
+})
+
 
 def _write(root, relative, content):
     path = root / relative
@@ -72,12 +117,16 @@ class FindingAndScopeTest(unittest.TestCase):
     def test_exact_active_allowlist_filters_before_decode(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            self.assertEqual(EXPECTED_ACTIVE_TEXT_NAMES, ACTIVE_TEXT_NAMES)
+            self.assertEqual(EXPECTED_ACTIVE_TEXT_SUFFIXES,
+                             ACTIVE_TEXT_SUFFIXES)
             expected = set()
-            for name in ACTIVE_TEXT_NAMES:
+            for name in EXPECTED_ACTIVE_TEXT_NAMES:
                 relative = "src/pkg/%s" % name
                 _write(root, relative, "DeleteModel\n")
                 expected.add(relative)
-            for index, suffix in enumerate(sorted(ACTIVE_TEXT_SUFFIXES)):
+            for index, suffix in enumerate(
+                    sorted(EXPECTED_ACTIVE_TEXT_SUFFIXES)):
                 relative = "src/pkg/file_%02d%s" % (index, suffix)
                 _write(root, relative, "DeleteModel\n")
                 expected.add(relative)
@@ -179,6 +228,20 @@ class CommentAndTokenTest(unittest.TestCase):
                 findings = self._scan(relative, content)
                 self.assertEqual((Finding(relative, 1, token),), findings)
 
+    def test_jinja_comment_markers_inside_strings_remain_active(self):
+        findings = self._scan(
+            "src/pkg/template.sdf.jinja",
+            '{{ "{# DeleteModel #}" }}\n'
+            "{{ '<!-- SpawnModel -->' }}\n",
+        )
+        self.assertEqual(
+            (
+                Finding("src/pkg/template.sdf.jinja", 1, "DeleteModel"),
+                Finding("src/pkg/template.sdf.jinja", 2, "SpawnModel"),
+            ),
+            findings,
+        )
+
     def test_crlf_block_comments_preserve_line_number(self):
         findings = self._scan(
             "src/pkg/file.xml",
@@ -188,10 +251,13 @@ class CommentAndTokenTest(unittest.TestCase):
             (Finding("src/pkg/file.xml", 4, "DeleteModel"),), findings)
 
     def test_all_dynamic_lifecycle_tokens_are_detected(self):
-        content = "\n".join(DYNAMIC_LIFECYCLE_TOKENS) + "\n"
+        self.assertEqual(EXPECTED_DYNAMIC_LIFECYCLE_TOKENS,
+                         DYNAMIC_LIFECYCLE_TOKENS)
+        content = "\n".join(EXPECTED_DYNAMIC_LIFECYCLE_TOKENS) + "\n"
         findings = self._scan("src/pkg/lifecycle.py", content)
-        self.assertEqual(set(DYNAMIC_LIFECYCLE_TOKENS), set(_tokens(findings)))
-        self.assertEqual(len(DYNAMIC_LIFECYCLE_TOKENS), len(findings))
+        self.assertEqual(set(EXPECTED_DYNAMIC_LIFECYCLE_TOKENS),
+                         set(_tokens(findings)))
+        self.assertEqual(len(EXPECTED_DYNAMIC_LIFECYCLE_TOKENS), len(findings))
 
     def test_startup_spawn_model_is_not_dynamic_lifecycle(self):
         findings = self._scan(
@@ -318,8 +384,15 @@ class PackageBoundaryTest(unittest.TestCase):
 
 class StartupSpawnBoundaryTest(unittest.TestCase):
     def test_real_startup_spawns_are_exactly_classified(self):
-        expected = (JOINT_CANDIDATE_SPAWNS | STANDALONE_SMOKE_SPAWNS |
-                    INACTIVE_LEGACY_SPAWNS)
+        self.assertEqual(EXPECTED_JOINT_CANDIDATE_SPAWNS,
+                         JOINT_CANDIDATE_SPAWNS)
+        self.assertEqual(EXPECTED_STANDALONE_SMOKE_SPAWNS,
+                         STANDALONE_SMOKE_SPAWNS)
+        self.assertEqual(EXPECTED_INACTIVE_LEGACY_SPAWNS,
+                         INACTIVE_LEGACY_SPAWNS)
+        expected = (EXPECTED_JOINT_CANDIDATE_SPAWNS |
+                    EXPECTED_STANDALONE_SMOKE_SPAWNS |
+                    EXPECTED_INACTIVE_LEGACY_SPAWNS)
         self.assertEqual((3, 3, 6), (
             len(JOINT_CANDIDATE_SPAWNS), len(STANDALONE_SMOKE_SPAWNS),
             len(INACTIVE_LEGACY_SPAWNS)))
@@ -330,6 +403,20 @@ class StartupSpawnBoundaryTest(unittest.TestCase):
         self.assertEqual(12, len(actual))
         self.assertEqual(expected, set(actual))
         self.assertEqual((), validate_startup_spawns(ROOT))
+
+    def test_overlapping_spawn_classifications_fail_closed(self):
+        identity = ("src/pkg/start.launch", "known")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _write(root, identity[0],
+                   '<launch><node pkg="gazebo_ros" type="spawn_model" '
+                   'name="known"/></launch>\n')
+            findings = validate_startup_spawns(
+                root, frozenset({identity}), frozenset({identity}),
+                frozenset())
+        self.assertTrue(any(
+            item.token.startswith("startup-spawn:classification-overlap")
+            for item in findings), findings)
 
     def test_unclassified_duplicate_missing_and_structural_changes_fail(self):
         identity = ("src/pkg/start.launch", "known")
@@ -403,6 +490,38 @@ class RemovedReferenceBoundaryTest(unittest.TestCase):
 
 
 class RepositoryIntegrationTest(unittest.TestCase):
+    def test_validate_repository_schema_errors_are_structured(self):
+        valid_manifest = {
+            "packages": {},
+            "forbidden": {"package_names": [], "runtime_tokens": []},
+        }
+        valid_overlay = {"removed": []}
+        cases = (
+            ({}, valid_overlay, "config/runtime_sources.json",
+             "boundary:manifest-schema"),
+            ({"packages": [], "forbidden": valid_manifest["forbidden"]},
+             valid_overlay, "config/runtime_sources.json",
+             "boundary:manifest-schema"),
+            ({"packages": {}, "forbidden": []}, valid_overlay,
+             "config/runtime_sources.json", "boundary:manifest-schema"),
+            (valid_manifest, {}, "config/runtime_overlay.json",
+             "boundary:overlay-schema"),
+            (valid_manifest, {"removed": "not-a-list"},
+             "config/runtime_overlay.json", "boundary:overlay-schema"),
+        )
+        for manifest, overlay, path, token in cases:
+            with self.subTest(token=token, payload=(manifest, overlay)):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    _write(root, "config/runtime_sources.json",
+                           json.dumps(manifest))
+                    _write(root, "config/runtime_overlay.json",
+                           json.dumps(overlay))
+                    self.assertEqual(
+                        (Finding(path, 0, token),),
+                        validate_repository(root),
+                    )
+
     def _production_delta(self, mutation, removed=()):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
