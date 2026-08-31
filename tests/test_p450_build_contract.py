@@ -45,6 +45,22 @@ EXPECTED_MSG_COMPONENTS = frozenset({
     "std_msgs",
 })
 
+BRICK_AERIAL_CATKIN_COMPONENTS = frozenset({
+    "cv_bridge",
+    "gazebo_msgs",
+    "geometry_msgs",
+    "mavros_msgs",
+    "message_filters",
+    "nav_msgs",
+    "rospy",
+    "sensor_msgs",
+    "std_msgs",
+    "std_srvs",
+    "tf",
+    "tf2_ros",
+    "visualization_msgs",
+})
+
 EXPECTED_CATKIN_COMPONENTS = {
     "prometheus_uav_control": frozenset({
         "diagnostic_updater",
@@ -68,6 +84,7 @@ EXPECTED_CATKIN_COMPONENTS = {
         "roscpp",
         "sensor_msgs",
     }),
+    "brick_aerial_perception": BRICK_AERIAL_CATKIN_COMPONENTS,
 }
 
 EXPECTED_MANIFEST_PHASES = {
@@ -139,6 +156,20 @@ EXPECTED_MANIFEST_PHASES = {
             "realsense_ros_gazebo",
         }),
     },
+    "brick_aerial_perception": {
+        "build": BRICK_AERIAL_CATKIN_COMPONENTS,
+        "export": BRICK_AERIAL_CATKIN_COMPONENTS,
+        "exec": BRICK_AERIAL_CATKIN_COMPONENTS | frozenset({
+            "prometheus_gazebo",
+            "prometheus_msgs",
+            "prometheus_uav_control",
+            "python3-numpy",
+            "python3-opencv",
+            "python3-yaml",
+            "realsense_ros_gazebo",
+            "rviz",
+        }),
+    },
 }
 
 EXPECTED_CATKIN_EXPORTS = {
@@ -204,6 +235,12 @@ EXPECTED_CATKIN_PACKAGE_FIELDS = {
         ],
         "DEPENDS": frozenset({"Boost"}),
     },
+    "brick_aerial_perception": {
+        "INCLUDE_DIRS": frozenset(),
+        "LIBRARIES": frozenset(),
+        "CATKIN_DEPENDS": frozenset(),
+        "DEPENDS": frozenset(),
+    },
 }
 
 EXPECTED_UAV_INCLUDE_TOKENS = frozenset({
@@ -222,6 +259,7 @@ EXPECTED_NON_CATKIN_PACKAGES = {
     "prometheus_gazebo": frozenset(),
     "prometheus_uav_control": frozenset({"Eigen3", "mavlink", "PkgConfig"}),
     "realsense_ros_gazebo": frozenset({"Boost"}),
+    "brick_aerial_perception": frozenset(),
 }
 
 EXPECTED_MSG_MANIFEST_PHASES = {
@@ -256,6 +294,19 @@ EXPECTED_INSTALL_DIRECTORIES = {
         "launch",
         "rviz",
         "worlds",
+    }),
+}
+
+EXPECTED_INSTALLED_FILES = {
+    "prometheus_msgs": frozenset(),
+    "prometheus_gazebo": frozenset({"scripts/jinja_gen.py"}),
+    "prometheus_uav_control": frozenset(),
+    "realsense_ros_gazebo": frozenset(),
+    "brick_aerial_perception": frozenset({
+        "README.md",
+        "scripts/aerial_brick_pose_node.py",
+        "scripts/aerial_viewpoint_mission.py",
+        "scripts/world_tf_bridge.py",
     }),
 }
 
@@ -663,6 +714,12 @@ class P450BuildContractTest(unittest.TestCase):
             "src/p450/prometheus_uav_control/CMakeLists.txt: include surface "
             "must remain local plus declared dependency variables",
         )
+        self.assertEqual(
+            (),
+            _commands(package, "target_include_directories"),
+            "src/p450/prometheus_uav_control/CMakeLists.txt: target-specific "
+            "include paths would bypass the frozen package-local surface",
+        )
         self.assertIn(
             "vendor_upstream/communication/src/param_manager.cpp",
             _targets(package)["uav_controller"],
@@ -694,11 +751,28 @@ class P450BuildContractTest(unittest.TestCase):
                 with self.subTest(package=package, stale=stale):
                     self.assertNotIn(stale, components)
                     self.assertNotIn(stale, dependencies)
-            self.assertNotIn("generate_messages", command_names)
+            self.assertFalse(
+                command_names & {
+                    "add_action_files",
+                    "add_message_files",
+                    "add_service_files",
+                    "generate_messages",
+                },
+                "src/p450/%s/CMakeLists.txt: non-interface package declares "
+                "message-generation commands" % package,
+            )
+            for interface_directory in ("action", "msg", "srv"):
+                self.assertFalse(
+                    (P450 / package / interface_directory).exists(),
+                    "src/p450/%s: stale local interface directory %s" % (
+                        package, interface_directory),
+                )
             phantom_targets = {
                 token for token in target_dependencies
                 if ("gencpp" in token or
-                    re.search(r"(^|_)generate_messages(_|$)", token))
+                    re.search(r"(^|_)generate_messages(_|$)", token) or
+                    ("EXPORTED_TARGETS" in token and
+                     token != "${catkin_EXPORTED_TARGETS}"))
             }
             self.assertFalse(
                 phantom_targets,
@@ -738,7 +812,7 @@ class P450BuildContractTest(unittest.TestCase):
                         phase, sorted(expected), sorted(dependencies[phase])),
                 )
 
-    def test_compiled_dependencies_are_declared(self):
+    def test_package_dependency_closures_are_exact(self):
         for package, expected in EXPECTED_CATKIN_COMPONENTS.items():
             actual_cmake = _catkin_components(package)
             with self.subTest(package=package, declaration="CMake"):
@@ -876,8 +950,17 @@ class P450BuildContractTest(unittest.TestCase):
                         package, sorted(expected), sorted(actual)),
                 )
 
-        for package in EXPECTED_INSTALL_DIRECTORIES:
-            for relative in _installed_file_sources(package):
+        for package, expected in EXPECTED_INSTALLED_FILES.items():
+            actual = _installed_file_sources(package)
+            with self.subTest(package=package, contract="installed-files"):
+                self.assertEqual(
+                    expected,
+                    actual,
+                    "src/p450/%s/CMakeLists.txt: installed file/program "
+                    "surface differs; expected=%s actual=%s" % (
+                        package, sorted(expected), sorted(actual)),
+                )
+            for relative in actual:
                 with self.subTest(package=package, file=relative):
                     self.assertTrue(
                         (P450 / package / relative).is_file(),
