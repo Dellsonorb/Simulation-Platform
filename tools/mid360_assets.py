@@ -123,7 +123,13 @@ class AssetManifest:
     def load(cls, path):
         manifest_path = Path(path)
         try:
-            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest_text = manifest_path.read_text(encoding="utf-8")
+        except UnicodeError as error:
+            raise AssetValidationError(
+                "manifest is not valid UTF-8: {}".format(manifest_path)
+            ) from error
+        try:
+            payload = json.loads(manifest_text)
         except json.JSONDecodeError as error:
             raise AssetValidationError(
                 "invalid JSON: {}".format(manifest_path)
@@ -233,7 +239,23 @@ def _relative(path, root):
 
 def _scan_tree(root):
     observed = set()
-    for current, directories, filenames in os.walk(str(root), followlinks=False):
+
+    def fail_closed(error):
+        failed_path = Path(error.filename) if error.filename else root
+        try:
+            context = failed_path.relative_to(root).as_posix()
+        except ValueError:
+            context = str(failed_path)
+        if context == ".":
+            context = "asset root"
+        reason = error.strerror or str(error)
+        raise AssetValidationError(
+            "asset tree scan failed at {}: {}".format(context, reason)
+        ) from error
+
+    for current, directories, filenames in os.walk(
+        str(root), followlinks=False, onerror=fail_closed
+    ):
         current_path = Path(current)
         for name in sorted(directories + filenames):
             path = current_path / name
@@ -328,23 +350,30 @@ def _dae_references(root, dae_relative):
     document = _parse_xml(root, dae_relative)
     references = set()
     base = PurePosixPath(dae_relative).parent.as_posix()
+
+    def add_reference(value):
+        value = value.strip()
+        if not value or value.startswith("#"):
+            return
+        if URI_SCHEME_PATTERN.match(value):
+            raise AssetValidationError(
+                "asset URI scheme is forbidden: {}".format(value)
+            )
+        relative = value.split("#", 1)[0]
+        if relative:
+            references.add(_normalise_local_reference(base, relative))
+
+    for element in document.iter():
+        for attribute_name, value in element.attrib.items():
+            local_name = attribute_name.rsplit("}", 1)[-1]
+            if local_name in {"url", "source"}:
+                add_reference(value)
     for image in document.iter():
         if _local_tag(image) != "image":
             continue
         for element in image.iter():
-            if _local_tag(element) != "init_from":
-                continue
-            value = (element.text or "").strip()
-            if URI_SCHEME_PATTERN.match(value):
-                raise AssetValidationError(
-                    "asset URI scheme is forbidden: {}".format(value)
-                )
-            if (
-                not value
-                or value.startswith("#")
-            ):
-                continue
-            references.add(_normalise_local_reference(base, value))
+            if _local_tag(element) == "init_from":
+                add_reference(element.text or "")
     return references
 
 

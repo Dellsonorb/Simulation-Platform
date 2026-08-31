@@ -1,4 +1,5 @@
 import contextlib
+import errno
 import hashlib
 import importlib.util
 import io
@@ -9,6 +10,7 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from unittest import mock
 
 from tools.runtime_boundary import strip_comments
 
@@ -247,6 +249,11 @@ class Mid360AssetValidatorTest(unittest.TestCase):
                 break
         self._write_config()
 
+    def _write_dae(self, document):
+        relative = "models/MID360/meshes/MID360.dae"
+        (self.asset_root / relative).write_text(document, encoding="utf-8")
+        self._refresh_hash(relative)
+
     def test_valid_tree_returns_canonical_root(self):
         result = self.module.validate_asset_tree(
             self._manifest(), self.asset_root
@@ -365,6 +372,52 @@ class Mid360AssetValidatorTest(unittest.TestCase):
         ):
             self.module.validate_asset_tree(self._manifest(), self.asset_root)
 
+    def test_directory_scan_errors_fail_closed_in_api_and_cli(self):
+        blocked = self.asset_root / "models/MID360/scan_mode"
+        real_scandir = self.module.os.scandir
+
+        def denied_scandir(path):
+            if Path(path) == blocked:
+                raise PermissionError(
+                    errno.EACCES, "Permission denied", str(blocked)
+                )
+            return real_scandir(path)
+
+        expected = (
+            "asset tree scan failed at models/MID360/scan_mode: "
+            "Permission denied"
+        )
+        with mock.patch.object(
+            self.module.os, "scandir", side_effect=denied_scandir
+        ):
+            with self.assertRaisesRegex(
+                self.module.AssetValidationError,
+                "^{}$".format(re.escape(expected)),
+            ):
+                self.module.validate_asset_tree(
+                    self._manifest(), self.asset_root
+                )
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with mock.patch.object(
+            self.module.os, "scandir", side_effect=denied_scandir
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = self.module.main(
+                [
+                    "--config",
+                    str(self.config),
+                    "--asset-root",
+                    str(self.asset_root),
+                ]
+            )
+        self.assertEqual(1, result)
+        self.assertEqual("", stdout.getvalue())
+        self.assertEqual(
+            "mid360-assets: {}\n".format(expected), stderr.getvalue()
+        )
+        self.assertEqual(1, len(stderr.getvalue().splitlines()))
+
     def test_rejects_a_hash_mismatch(self):
         relative = "models/MID360/scan_mode/mid360.csv"
         (self.asset_root / relative).write_text("changed\n", encoding="utf-8")
@@ -397,6 +450,40 @@ class Mid360AssetValidatorTest(unittest.TestCase):
             r"^unsupported schema_version: 2$",
         ):
             self._manifest()
+
+    def test_invalid_utf8_manifest_fails_cleanly_in_api_and_cli(self):
+        self.config.write_bytes(b"{\"schema_version\": \xff}")
+        expected = "manifest is not valid UTF-8: {}".format(self.config)
+
+        try:
+            self._manifest()
+        except self.module.AssetValidationError as error:
+            self.assertEqual(expected, str(error))
+        except UnicodeError as error:
+            self.fail("API leaked UnicodeError: {}".format(error))
+        else:
+            self.fail("invalid UTF-8 manifest was accepted")
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                result = self.module.main(
+                    [
+                        "--config",
+                        str(self.config),
+                        "--asset-root",
+                        str(self.asset_root),
+                    ]
+                )
+        except UnicodeError as error:
+            self.fail("CLI leaked UnicodeError: {}".format(error))
+        self.assertEqual(1, result)
+        self.assertEqual("", stdout.getvalue())
+        self.assertEqual(
+            "mid360-assets: {}\n".format(expected), stderr.getvalue()
+        )
+        self.assertEqual(1, len(stderr.getvalue().splitlines()))
 
     def test_schema_version_requires_an_integer_not_bool_or_float(self):
         for value in (True, False, 1.0):
@@ -587,6 +674,52 @@ class Mid360AssetValidatorTest(unittest.TestCase):
                     ),
                 )
 
+    def test_dae_resource_attributes_allow_fragments_and_allowlisted_relatives(self):
+        self._write_dae(
+            "<COLLADA xmlns:ext='urn:test'><node "
+            "source='#positions' "
+            "ext:url='MID360.dae#geometry'/></COLLADA>\n"
+        )
+
+        self.assertEqual(
+            self.asset_root.resolve(),
+            self.module.validate_asset_tree(self._manifest(), self.asset_root),
+        )
+
+    def test_dae_resource_attributes_reject_uri_schemes(self):
+        cases = (
+            ("url", "FiLe:///tmp/texture.png"),
+            ("source", "HTTPS://example.invalid/mesh.dae"),
+            ("ext:url", "PACKAGE://demo/mesh.dae"),
+        )
+        for attribute, value in cases:
+            with self.subTest(attribute=attribute, value=value):
+                self._write_dae(
+                    "<COLLADA xmlns:ext='urn:test'><node "
+                    "{}='{}'/></COLLADA>\n".format(attribute, value)
+                )
+                with self.assertRaisesRegex(
+                    self.module.AssetValidationError,
+                    "^asset URI scheme is forbidden: {}$".format(
+                        re.escape(value)
+                    ),
+                ):
+                    self.module.validate_asset_tree(
+                        self._manifest(), self.asset_root
+                    )
+
+    def test_dae_resource_attributes_reject_unallowlisted_relative_uri(self):
+        self._write_dae(
+            "<COLLADA><node url='texture.png#surface'/></COLLADA>\n"
+        )
+
+        with self.assertRaisesRegex(
+            self.module.AssetValidationError,
+            r"^asset reference is not allowlisted: "
+            r"models/MID360/meshes/texture\.png$",
+        ):
+            self.module.validate_asset_tree(self._manifest(), self.asset_root)
+
     def test_cli_prints_canonical_root_and_exact_failures(self):
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -662,7 +795,14 @@ class Mid360FutureRuntimeContractTest(unittest.TestCase):
         cmake_path = PLUGIN_ROOT / "CMakeLists.txt"
         raw_cmake = cmake_path.read_text(encoding="utf-8")
         cmake = strip_comments(cmake_path, raw_cmake)
-        self.assertIn("find_package(Protobuf REQUIRED)", cmake)
+        for package_name in ("gazebo", "PCL", "Protobuf"):
+            with self.subTest(package=package_name):
+                self.assertRegex(
+                    cmake,
+                    r"find_package\s*\(\s*{}\s+REQUIRED\s*\)".format(
+                        package_name
+                    ),
+                )
         find_libraries = re.finditer(
             r"find_library\s*\(\s*"
             r"(?P<variable>[A-Za-z_][A-Za-z0-9_]*)"
@@ -689,14 +829,20 @@ class Mid360FutureRuntimeContractTest(unittest.TestCase):
             re.DOTALL,
         )
         self.assertTrue(link_bodies)
+        required_link_items = {
+            "${catkin_LIBRARIES}",
+            "${GAZEBO_LIBRARIES}",
+            "${PCL_LIBRARIES}",
+            "protobuf::libprotobuf",
+            "${%s}" % ray_variable,
+        }
         self.assertTrue(
             any(
-                "protobuf::libprotobuf" in body
-                and "${%s}" % ray_variable in body
+                all(item in body for item in required_link_items)
                 for body in link_bodies
             ),
-            "Livox target must link protobuf and the discovered RayPlugin "
-            "variable in one target_link_libraries call",
+            "Livox target must link Catkin, Gazebo, PCL, protobuf, and the "
+            "discovered RayPlugin variable in one target_link_libraries call",
         )
         absolute_guard = re.search(
             r"if\s*\([^)]*NOT\s+IS_ABSOLUTE\s+"
