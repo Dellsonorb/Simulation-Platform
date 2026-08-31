@@ -80,6 +80,41 @@ REQUIRED_MANIFEST_DEPENDENCIES = {
     ] | frozenset({"boost"}),
 }
 
+EXPECTED_MSG_MANIFEST_PHASES = {
+    "build": EXPECTED_MSG_COMPONENTS,
+    "export": EXPECTED_MSG_COMPONENTS - {"message_generation"},
+    "exec": ((EXPECTED_MSG_COMPONENTS - {"message_generation"}) |
+             {"message_runtime"}),
+}
+
+REQUIRED_INSTALL_DIRECTORIES = {
+    "prometheus_gazebo": frozenset({
+        "config",
+        "gazebo_models",
+        "gazebo_worlds",
+        "launch_basic",
+        "launch_fmt",
+        "launch_test",
+        "launch_uav_with_sensor",
+    }),
+    "prometheus_uav_control": frozenset({
+        "include",
+        "launch",
+        "launch_controller_test",
+        "meshes",
+    }),
+    "realsense_ros_gazebo": frozenset({
+        "include/realsense_gazebo_plugin",
+        "worlds",
+    }),
+    "brick_aerial_perception": frozenset({
+        "config",
+        "launch",
+        "rviz",
+        "worlds",
+    }),
+}
+
 FORBIDDEN_DEPENDENCIES = frozenset({
     "air_ground_pose_bridge",
     "aerial_ground_bridge",
@@ -216,6 +251,18 @@ def _install_directory_sources(package):
     return tuple(result)
 
 
+def _catkin_installed_programs(package):
+    result = []
+    for tokens in _commands(package, "catkin_install_python"):
+        if not tokens or tokens[0] != "PROGRAMS":
+            continue
+        for token in tokens[1:]:
+            if token == "DESTINATION":
+                break
+            result.append(token)
+    return frozenset(result)
+
+
 def _installed_targets(package):
     result = []
     stop = {"ARCHIVE", "DESTINATION", "INCLUDES", "LIBRARY", "RUNTIME"}
@@ -288,6 +335,18 @@ class P450BuildContractTest(unittest.TestCase):
             "prometheus_gazebo_gencpp",
             _cmake_path("prometheus_gazebo").read_text(encoding="utf-8"),
         )
+        self.assertNotIn(
+            "prometheus_msgs",
+            _catkin_components("prometheus_gazebo"),
+            "src/p450/prometheus_gazebo/CMakeLists.txt: asset-only package "
+            "must not compile against prometheus_msgs",
+        )
+        self.assertNotIn(
+            "prometheus_msgs",
+            _all_manifest_dependencies("prometheus_gazebo"),
+            "src/p450/prometheus_gazebo/package.xml: asset-only package must "
+            "not declare prometheus_msgs",
+        )
 
     def test_message_package_has_only_its_real_generation_dependencies(self):
         package = "prometheus_msgs"
@@ -298,37 +357,58 @@ class P450BuildContractTest(unittest.TestCase):
         )
         self.assertEqual(frozenset(), non_catkin)
         dependencies = _manifest_dependencies(package)
-        self.assertEqual(
-            EXPECTED_MSG_COMPONENTS,
-            dependencies["build"],
-        )
-        self.assertEqual(
-            (EXPECTED_MSG_COMPONENTS - {"message_generation"}) |
-            {"message_runtime"},
-            dependencies["exec"],
-        )
+        for phase, expected in EXPECTED_MSG_MANIFEST_PHASES.items():
+            with self.subTest(package=package, phase=phase):
+                self.assertEqual(
+                    expected,
+                    dependencies[phase],
+                    "src/p450/prometheus_msgs/package.xml: %s dependency "
+                    "closure differs; expected=%s actual=%s" % (
+                        phase, sorted(expected), sorted(dependencies[phase])),
+                )
 
     def test_compiled_dependencies_are_declared(self):
         for package, required in REQUIRED_CATKIN_COMPONENTS.items():
+            missing_cmake = required - _catkin_components(package)
             with self.subTest(package=package, declaration="CMake"):
-                self.assertTrue(required <= _catkin_components(package))
-            with self.subTest(package=package, declaration="manifest"):
-                self.assertTrue(
-                    REQUIRED_MANIFEST_DEPENDENCIES[package] <=
-                    _all_manifest_dependencies(package)
+                self.assertFalse(
+                    missing_cmake,
+                    "src/p450/%s/CMakeLists.txt: missing direct Catkin "
+                    "components %s" % (package, sorted(missing_cmake)),
                 )
+            manifest = _manifest_dependencies(package)
+            for phase in ("build", "export", "exec"):
+                required_phase = REQUIRED_MANIFEST_DEPENDENCIES[package]
+                missing = required_phase - manifest[phase]
+                with self.subTest(package=package, phase=phase):
+                    self.assertFalse(
+                        missing,
+                        "src/p450/%s/package.xml: missing %s dependencies %s"
+                        % (package, phase, sorted(missing)),
+                    )
 
         uav_manifest = _manifest_dependencies("prometheus_uav_control")
-        self.assertIn("prometheus_msgs", uav_manifest["build"])
+        self.assertIn(
+            "prometheus_msgs",
+            uav_manifest["build"],
+            "src/p450/prometheus_uav_control/package.xml: missing build edge "
+            "to prometheus_msgs",
+        )
 
     def test_aerial_perception_declares_d435_runtime(self):
         runtime = _manifest_dependencies("brick_aerial_perception")["exec"]
-        self.assertTrue({
+        required = {
             "prometheus_gazebo",
             "prometheus_msgs",
             "prometheus_uav_control",
             "realsense_ros_gazebo",
-        } <= runtime)
+        }
+        missing = required - runtime
+        self.assertFalse(
+            missing,
+            "src/p450/brick_aerial_perception/package.xml: missing exec "
+            "dependencies %s" % sorted(missing),
+        )
 
     def test_install_directories_exist(self):
         for package in (
@@ -341,7 +421,31 @@ class P450BuildContractTest(unittest.TestCase):
             for relative in _install_directory_sources(package):
                 with self.subTest(package=package, relative=relative):
                     self.assertNotIn("${", relative)
-                    self.assertTrue((P450 / package / relative).is_dir())
+                    self.assertTrue(
+                        (P450 / package / relative).is_dir(),
+                        "src/p450/%s/CMakeLists.txt: install DIRECTORY does "
+                        "not exist: %s" % (package, relative),
+                    )
+
+        for package, required in REQUIRED_INSTALL_DIRECTORIES.items():
+            actual = frozenset(
+                relative.rstrip("/")
+                for relative in _install_directory_sources(package)
+            )
+            missing = required - actual
+            with self.subTest(package=package, contract="required-resources"):
+                self.assertFalse(
+                    missing,
+                    "src/p450/%s/CMakeLists.txt: missing install directories "
+                    "%s" % (package, sorted(missing)),
+                )
+
+        self.assertIn(
+            "scripts/jinja_gen.py",
+            _catkin_installed_programs("prometheus_gazebo"),
+            "src/p450/prometheus_gazebo/CMakeLists.txt: jinja_gen.py must be "
+            "installed as an executable program",
+        )
 
     def test_runtime_targets_are_installed_and_realsense_is_exported(self):
         self.assertEqual(
