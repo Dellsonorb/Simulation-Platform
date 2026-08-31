@@ -4,10 +4,13 @@ import importlib.util
 import io
 import json
 import re
+import shlex
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+from tools.runtime_boundary import strip_comments
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +50,26 @@ REQUIRED_CATKIN_DEPENDENCIES = {
     "sensor_msgs",
     "tf",
 }
+CMAKE_FIND_LIBRARY_OPTIONS = frozenset({
+    "CMAKE_FIND_ROOT_PATH_BOTH",
+    "DOC",
+    "HINTS",
+    "NAMES",
+    "NAMES_PER_DIR",
+    "NO_CACHE",
+    "NO_CMAKE_ENVIRONMENT_PATH",
+    "NO_CMAKE_FIND_ROOT_PATH",
+    "NO_CMAKE_PATH",
+    "NO_CMAKE_SYSTEM_PATH",
+    "NO_DEFAULT_PATH",
+    "NO_PACKAGE_ROOT_PATH",
+    "NO_SYSTEM_ENVIRONMENT_PATH",
+    "ONLY_CMAKE_FIND_ROOT_PATH",
+    "PATHS",
+    "PATH_SUFFIXES",
+    "REGISTRY_VIEW",
+    "REQUIRED",
+})
 
 
 def _sha256_bytes(content):
@@ -59,6 +82,49 @@ def _load_validator(test_case):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _cmake_find_library_names(body):
+    try:
+        tokens = shlex.split(body, comments=False, posix=True)
+    except ValueError:
+        return tuple()
+    upper_tokens = [token.upper() for token in tokens]
+    if "NAMES" in upper_tokens:
+        cursor = upper_tokens.index("NAMES") + 1
+    else:
+        cursor = 0
+    names = []
+    while cursor < len(tokens):
+        if upper_tokens[cursor] in CMAKE_FIND_LIBRARY_OPTIONS:
+            break
+        names.extend(
+            value for value in tokens[cursor].split(";") if value
+        )
+        cursor += 1
+    return tuple(names)
+
+
+class Mid360CMakeContractParserTest(unittest.TestCase):
+    def test_find_library_names_accepts_positional_and_names_forms(self):
+        self.assertEqual(
+            ("RayPlugin",),
+            _cmake_find_library_names("RayPlugin PATHS /opt/gazebo"),
+        )
+        self.assertEqual(
+            ("RayPlugin", "AlternateRayPlugin"),
+            _cmake_find_library_names(
+                "NAMES RayPlugin AlternateRayPlugin HINTS /opt/gazebo"
+            ),
+        )
+
+    def test_find_library_names_rejects_doc_only_mentions(self):
+        self.assertEqual(
+            ("WrongLibrary",),
+            _cmake_find_library_names(
+                'NAMES WrongLibrary DOC "RayPlugin" PATHS /opt/gazebo'
+            ),
+        )
 
 
 class Mid360ManifestContractTest(unittest.TestCase):
@@ -197,26 +263,78 @@ class Mid360AssetValidatorTest(unittest.TestCase):
         ):
             self.module.validate_asset_tree(self._manifest(), self.asset_root)
 
-    def test_allows_only_explicit_source_and_install_package_metadata(self):
-        metadata = {
+    def test_accepts_bare_source_or_install_package_metadata_modes(self):
+        metadata_contents = {
             "CMakeLists.txt": "source metadata\n",
             "package.xml": "<package/>\n",
             "cmake/sim_platform_assetsConfig.cmake": "# generated\n",
             "cmake/sim_platform_assetsConfig-version.cmake": "# generated\n",
         }
-        for relative, content in metadata.items():
-            path = self.asset_root / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
+        modes = (
+            frozenset(),
+            frozenset({"CMakeLists.txt", "package.xml"}),
+            frozenset({
+                "package.xml",
+                "cmake/sim_platform_assetsConfig.cmake",
+                "cmake/sim_platform_assetsConfig-version.cmake",
+            }),
+        )
+        for mode in modes:
+            with self.subTest(mode=sorted(mode)):
+                for relative in metadata_contents:
+                    path = self.asset_root / relative
+                    if path.exists():
+                        path.unlink()
+                for relative in mode:
+                    path = self.asset_root / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(
+                        metadata_contents[relative], encoding="utf-8"
+                    )
+                self.assertEqual(
+                    self.asset_root.resolve(),
+                    self.module.validate_asset_tree(
+                        self._manifest(), self.asset_root
+                    ),
+                )
 
-        try:
-            result = self.module.validate_asset_tree(
-                self._manifest(), self.asset_root
-            )
-        except self.module.AssetValidationError as error:
-            self.fail("package metadata must be accepted: {}".format(error))
-        self.assertEqual(self.asset_root.resolve(), result)
+    def test_rejects_mixed_or_partial_package_metadata_modes(self):
+        metadata_contents = {
+            "CMakeLists.txt": "source metadata\n",
+            "package.xml": "<package/>\n",
+            "cmake/sim_platform_assetsConfig.cmake": "# generated\n",
+            "cmake/sim_platform_assetsConfig-version.cmake": "# generated\n",
+        }
+        invalid_modes = (
+            frozenset({"package.xml"}),
+            frozenset({"CMakeLists.txt"}),
+            frozenset({
+                "package.xml",
+                "cmake/sim_platform_assetsConfig.cmake",
+            }),
+            frozenset(metadata_contents),
+        )
+        for mode in invalid_modes:
+            with self.subTest(mode=sorted(mode)):
+                for relative in metadata_contents:
+                    path = self.asset_root / relative
+                    if path.exists():
+                        path.unlink()
+                for relative in mode:
+                    path = self.asset_root / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(
+                        metadata_contents[relative], encoding="utf-8"
+                    )
+                with self.assertRaisesRegex(
+                    self.module.AssetValidationError,
+                    r"^invalid package metadata mode: ",
+                ):
+                    self.module.validate_asset_tree(
+                        self._manifest(), self.asset_root
+                    )
 
+    def test_rejects_unknown_package_root_metadata(self):
         unexpected = self.asset_root / "README.md"
         unexpected.write_text("not package metadata\n", encoding="utf-8")
         with self.assertRaisesRegex(
@@ -280,6 +398,17 @@ class Mid360AssetValidatorTest(unittest.TestCase):
         ):
             self._manifest()
 
+    def test_schema_version_requires_an_integer_not_bool_or_float(self):
+        for value in (True, False, 1.0):
+            with self.subTest(value=value):
+                self.payload["schema_version"] = value
+                self._write_config()
+                with self.assertRaisesRegex(
+                    self.module.AssetValidationError,
+                    "^unsupported schema_version: {}$".format(value),
+                ):
+                    self._manifest()
+
     def test_rejects_a_false_resolved_license_claim(self):
         self.payload["source"]["license_status"] = "MIT"
         self._write_config()
@@ -330,6 +459,55 @@ class Mid360AssetValidatorTest(unittest.TestCase):
         ):
             self.module.validate_asset_tree(self._manifest(), self.asset_root)
 
+    def test_sdf_model_scheme_is_case_insensitive(self):
+        relative = "models/MID360/MID360.sdf"
+        path = self.asset_root / relative
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "model://MID360/meshes/MID360.dae",
+                "MoDeL://MID360/meshes/MID360.dae",
+            ),
+            encoding="utf-8",
+        )
+        self._refresh_hash(relative)
+
+        try:
+            result = self.module.validate_asset_tree(
+                self._manifest(), self.asset_root
+            )
+        except self.module.AssetValidationError as error:
+            self.fail(
+                "case-insensitive model scheme must resolve: {}".format(error)
+            )
+        self.assertEqual(self.asset_root.resolve(), result)
+
+    def test_sdf_rejects_every_unpermitted_uri_scheme(self):
+        relative = "models/MID360/MID360.sdf"
+        path = self.asset_root / relative
+        for uri in (
+            "model://Other/meshes/MID360.dae",
+            "PACKAGE://demo/mesh.dae",
+            "FiLe:/tmp/mesh.dae",
+            "HTTPS://example.invalid/mesh.dae",
+        ):
+            with self.subTest(uri=uri):
+                path.write_bytes(
+                    self.contents[relative].replace(
+                        b"</visual>",
+                        ("<uri>{}</uri></visual>".format(uri)).encode("utf-8"),
+                    )
+                )
+                self._refresh_hash(relative)
+                with self.assertRaisesRegex(
+                    self.module.AssetValidationError,
+                    "^asset URI scheme is forbidden: {}$".format(
+                        re.escape(uri)
+                    ),
+                ):
+                    self.module.validate_asset_tree(
+                        self._manifest(), self.asset_root
+                    )
+
     def test_rejects_unallowlisted_dae_uri(self):
         relative = "models/MID360/meshes/MID360.dae"
         (self.asset_root / relative).write_text(
@@ -359,9 +537,55 @@ class Mid360AssetValidatorTest(unittest.TestCase):
 
         with self.assertRaisesRegex(
             self.module.AssetValidationError,
-            r"^asset reference escapes root: file:///tmp/texture\.png$",
+            r"^asset URI scheme is forbidden: file:///tmp/texture\.png$",
         ):
             self.module.validate_asset_tree(self._manifest(), self.asset_root)
+
+    def test_dae_rejects_every_uri_scheme_case_insensitively(self):
+        relative = "models/MID360/meshes/MID360.dae"
+        path = self.asset_root / relative
+        for uri in (
+            "MoDeL://MID360/texture.png",
+            "PACKAGE://demo/texture.png",
+            "FiLe:/tmp/texture.png",
+            "HTTPS://example.invalid/texture.png",
+        ):
+            with self.subTest(uri=uri):
+                path.write_text(
+                    "<COLLADA><library_images><image>"
+                    "<init_from>{}</init_from>"
+                    "</image></library_images></COLLADA>\n".format(uri),
+                    encoding="utf-8",
+                )
+                self._refresh_hash(relative)
+                with self.assertRaisesRegex(
+                    self.module.AssetValidationError,
+                    "^asset URI scheme is forbidden: {}$".format(
+                        re.escape(uri)
+                    ),
+                ):
+                    self.module.validate_asset_tree(
+                        self._manifest(), self.asset_root
+                    )
+
+    def test_dae_allows_fragments_and_allowlisted_relative_references(self):
+        relative = "models/MID360/meshes/MID360.dae"
+        path = self.asset_root / relative
+        for value in ("#embedded-material", "MID360.dae"):
+            with self.subTest(value=value):
+                path.write_text(
+                    "<COLLADA><library_images><image>"
+                    "<init_from>{}</init_from>"
+                    "</image></library_images></COLLADA>\n".format(value),
+                    encoding="utf-8",
+                )
+                self._refresh_hash(relative)
+                self.assertEqual(
+                    self.asset_root.resolve(),
+                    self.module.validate_asset_tree(
+                        self._manifest(), self.asset_root
+                    ),
+                )
 
     def test_cli_prints_canonical_root_and_exact_failures(self):
         stdout = io.StringIO()
@@ -396,6 +620,11 @@ class Mid360FutureRuntimeContractTest(unittest.TestCase):
             ASSET_PACKAGE_ROOT.is_dir(),
             "Task 2 must add src/platform/sim_platform_assets",
         )
+        validator = _load_validator(self)
+        self.assertEqual(
+            ASSET_PACKAGE_ROOT.resolve(),
+            validator.validate_assets(CONFIG, ASSET_PACKAGE_ROOT),
+        )
         expected = {
             "CMakeLists.txt",
             "package.xml",
@@ -408,14 +637,78 @@ class Mid360FutureRuntimeContractTest(unittest.TestCase):
         }
         self.assertEqual(expected, observed)
 
+        package = ET.parse(ASSET_PACKAGE_ROOT / "package.xml").getroot()
+        description_node = package.find("description")
+        self.assertIsNotNone(description_node)
+        description = " ".join(
+            "".join(description_node.itertext()).split()
+        ).casefold()
+        self.assertIn("config/mid360_assets.json", description)
+        self.assertIn("redistribution", description)
+        self.assertIn("unresolved", description)
+        licenses = [
+            (node.text or "").strip().casefold()
+            for node in package.findall("license")
+        ]
+        self.assertTrue(licenses)
+        for license_name in licenses:
+            with self.subTest(license=license_name):
+                self.assertTrue(license_name)
+                self.assertNotIn("apache", license_name)
+                self.assertNotIn("bsd", license_name)
+                self.assertNotRegex(license_name, r"(?:^|[^a-z])mit(?:[^a-z]|$)")
+
     def test_livox_cmake_discovers_and_installs_host_abi_dependencies(self):
-        cmake = (PLUGIN_ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        cmake_path = PLUGIN_ROOT / "CMakeLists.txt"
+        raw_cmake = cmake_path.read_text(encoding="utf-8")
+        cmake = strip_comments(cmake_path, raw_cmake)
         self.assertIn("find_package(Protobuf REQUIRED)", cmake)
-        self.assertIn("protobuf::libprotobuf", cmake)
-        self.assertRegex(cmake, r"find_library\s*\([^)]*RayPlugin[^)]*\)")
-        self.assertRegex(
+        find_libraries = re.finditer(
+            r"find_library\s*\(\s*"
+            r"(?P<variable>[A-Za-z_][A-Za-z0-9_]*)"
+            r"(?P<body>[^)]*)\)",
             cmake,
-            r"target_link_libraries\s*\([^)]*\$\{[^}]*RAY[^}]*\}[^)]*\)",
+            re.DOTALL,
+        )
+        ray_library = next(
+            (
+                match
+                for match in find_libraries
+                if "RayPlugin" in _cmake_find_library_names(
+                    match.group("body")
+                )
+            ),
+            None,
+        )
+        self.assertIsNotNone(ray_library)
+        ray_variable = ray_library.group("variable")
+        link_bodies = re.findall(
+            r"target_link_libraries\s*\(\s*livox_laser_gazebo_plugins\b"
+            r"(?P<body>[^)]*)\)",
+            cmake,
+            re.DOTALL,
+        )
+        self.assertTrue(link_bodies)
+        self.assertTrue(
+            any(
+                "protobuf::libprotobuf" in body
+                and "${%s}" % ray_variable in body
+                for body in link_bodies
+            ),
+            "Livox target must link protobuf and the discovered RayPlugin "
+            "variable in one target_link_libraries call",
+        )
+        absolute_guard = re.search(
+            r"if\s*\([^)]*NOT\s+IS_ABSOLUTE\s+"
+            r"[\"']?\$\{%s\}[\"']?[^)]*\)"
+            r"(?P<body>.*?)endif\s*(?:\(\s*\))?" % re.escape(ray_variable),
+            cmake,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(absolute_guard)
+        self.assertRegex(
+            absolute_guard.group("body"),
+            r"message\s*\(\s*FATAL_ERROR\b",
         )
         catkin = re.search(
             r"find_package\s*\(\s*catkin\s+REQUIRED\s+COMPONENTS(?P<body>.*?)\)",
@@ -435,15 +728,20 @@ class Mid360FutureRuntimeContractTest(unittest.TestCase):
         self.assertRegex(cmake, r"install\s*\(\s*DIRECTORY\s+include/")
         for forbidden in (
             "libprotobuf.so.9",
-            "include_directories(/usr/include",
-            "link_directories(",
+            "/usr/include",
             "message_generation",
         ):
             with self.subTest(forbidden=forbidden):
-                self.assertNotIn(forbidden, cmake)
+                self.assertNotIn(forbidden, raw_cmake)
+        self.assertNotRegex(
+            raw_cmake,
+            r"(?i)\blink_directories\s*\(",
+        )
 
     def test_livox_manifest_matches_the_direct_dependency_surface(self):
         package = ET.parse(PLUGIN_ROOT / "package.xml").getroot()
+        self.assertEqual("2", package.attrib.get("format"))
+        self.assertEqual([], package.findall("depend"))
         for tag in ("build_depend", "build_export_depend", "exec_depend"):
             with self.subTest(tag=tag):
                 observed = {node.text.strip() for node in package.findall(tag)}
@@ -455,12 +753,32 @@ class Mid360FutureRuntimeContractTest(unittest.TestCase):
             & {"todo", "unknown", "tbd", "placeholder"}
         )
 
-    def test_livox_source_preserves_the_configured_frame(self):
-        source = (PLUGIN_ROOT / "src/livox_points_plugin.cpp").read_text(
-            encoding="utf-8"
+    def test_livox_sources_do_not_override_the_configured_frame(self):
+        source_paths = tuple(sorted(
+            path for path in PLUGIN_ROOT.rglob("*")
+            if path.suffix in {".cpp", ".h", ".hpp"}
+        ))
+        self.assertTrue(source_paths)
+        for source_path in source_paths:
+            with self.subTest(path=source_path.relative_to(PLUGIN_ROOT)):
+                active_source = strip_comments(
+                    source_path,
+                    source_path.read_text(encoding="utf-8"),
+                )
+                self.assertNotRegex(
+                    active_source,
+                    r'\bframeName\s*=\s*"livox"',
+                )
+
+        source_path = PLUGIN_ROOT / "src/livox_points_plugin.cpp"
+        source = strip_comments(
+            source_path, source_path.read_text(encoding="utf-8")
         )
+        configured = 'frameName = sdf->Get<std::string>("frameName")'
+        self.assertIn(configured, source)
+        runtime_source = source[source.index(configured):]
         self.assertNotRegex(
-            source,
+            runtime_source,
             r'(?:frameName|header\.frame_id)\s*=\s*"livox"',
         )
 

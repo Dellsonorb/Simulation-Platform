@@ -17,18 +17,26 @@ from typing import Tuple
 
 SUPPORTED_SCHEMA_VERSION = 1
 UNRESOLVED_LICENSE_STATUS = "redistribution-unresolved"
-MID360_MODEL_PREFIX = "model://MID360/"
 MID360_TARGET_PREFIX = "models/MID360/"
 REQUIRED_SDF_REFERENCES = frozenset({
     "models/MID360/meshes/MID360.dae",
     "models/MID360/scan_mode/mid360.csv",
 })
-ALLOWED_PACKAGE_METADATA = frozenset({
+SOURCE_PACKAGE_METADATA = frozenset({
     "CMakeLists.txt",
+    "package.xml",
+})
+INSTALL_PACKAGE_METADATA = frozenset({
     "package.xml",
     "cmake/sim_platform_assetsConfig.cmake",
     "cmake/sim_platform_assetsConfig-version.cmake",
 })
+PACKAGE_METADATA_MODES = frozenset({
+    frozenset(),
+    SOURCE_PACKAGE_METADATA,
+    INSTALL_PACKAGE_METADATA,
+})
+KNOWN_PACKAGE_METADATA = SOURCE_PACKAGE_METADATA | INSTALL_PACKAGE_METADATA
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 URI_SCHEME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
@@ -124,7 +132,10 @@ class AssetManifest:
         if not isinstance(payload, dict):
             raise AssetValidationError("manifest must be an object")
         schema_version = payload.get("schema_version")
-        if schema_version != SUPPORTED_SCHEMA_VERSION:
+        if (
+            type(schema_version) is not int
+            or schema_version != SUPPORTED_SCHEMA_VERSION
+        ):
             raise AssetValidationError(
                 "unsupported schema_version: {}".format(schema_version)
             )
@@ -287,22 +298,23 @@ def _sdf_references(root, sdf_relative):
     for element in document.iter():
         tag = _local_tag(element)
         value = (element.text or "").strip()
-        if tag == "uri" and value.startswith(MID360_MODEL_PREFIX):
-            suffix = value[len(MID360_MODEL_PREFIX):]
-            references.add(
-                _normalise_local_reference(MID360_TARGET_PREFIX, suffix)
-            )
-        elif tag == "uri" and value.startswith("file:"):
-            raise AssetValidationError(
-                "asset reference escapes root: {}".format(value)
-            )
-        elif (
-            tag == "uri"
-            and value
-            and not value.startswith("model://")
-            and not URI_SCHEME_PATTERN.match(value)
-        ):
-            references.add(_normalise_local_reference(base, value))
+        if tag == "uri" and value:
+            scheme_match = URI_SCHEME_PATTERN.match(value)
+            if scheme_match is not None:
+                scheme = scheme_match.group(0)[:-1].casefold()
+                remainder = value[scheme_match.end():]
+                if scheme != "model" or not remainder.startswith("//MID360/"):
+                    raise AssetValidationError(
+                        "asset URI scheme is forbidden: {}".format(value)
+                    )
+                references.add(
+                    _normalise_local_reference(
+                        MID360_TARGET_PREFIX,
+                        remainder[len("//MID360/"):],
+                    )
+                )
+            else:
+                references.add(_normalise_local_reference(base, value))
         elif tag == "csv_file_name" and value:
             references.add(
                 _normalise_local_reference(
@@ -323,14 +335,13 @@ def _dae_references(root, dae_relative):
             if _local_tag(element) != "init_from":
                 continue
             value = (element.text or "").strip()
-            if value.startswith("file:"):
+            if URI_SCHEME_PATTERN.match(value):
                 raise AssetValidationError(
-                    "asset reference escapes root: {}".format(value)
+                    "asset URI scheme is forbidden: {}".format(value)
                 )
             if (
                 not value
                 or value.startswith("#")
-                or URI_SCHEME_PATTERN.match(value)
             ):
                 continue
             references.add(_normalise_local_reference(base, value))
@@ -386,10 +397,17 @@ def validate_asset_tree(manifest, asset_root):
     missing = set(allowlist) - observed
     if missing:
         raise AssetValidationError("missing asset: {}".format(sorted(missing)[0]))
-    extra = observed - set(allowlist) - ALLOWED_PACKAGE_METADATA
+    extra = observed - set(allowlist) - KNOWN_PACKAGE_METADATA
     if extra:
         raise AssetValidationError(
             "unexpected asset: {}".format(sorted(extra)[0])
+        )
+    observed_metadata = frozenset(observed & KNOWN_PACKAGE_METADATA)
+    if observed_metadata not in PACKAGE_METADATA_MODES:
+        raise AssetValidationError(
+            "invalid package metadata mode: {}".format(
+                ", ".join(sorted(observed_metadata))
+            )
         )
 
     for relative in sorted(allowlist):
