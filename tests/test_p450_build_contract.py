@@ -45,7 +45,7 @@ EXPECTED_MSG_COMPONENTS = frozenset({
     "std_msgs",
 })
 
-REQUIRED_CATKIN_COMPONENTS = {
+EXPECTED_CATKIN_COMPONENTS = {
     "prometheus_uav_control": frozenset({
         "diagnostic_updater",
         "geometry_msgs",
@@ -70,9 +70,9 @@ REQUIRED_CATKIN_COMPONENTS = {
     }),
 }
 
-REQUIRED_MANIFEST_PHASES = {
+EXPECTED_MANIFEST_PHASES = {
     "prometheus_uav_control": {
-        "build": REQUIRED_CATKIN_COMPONENTS["prometheus_uav_control"] |
+        "build": EXPECTED_CATKIN_COMPONENTS["prometheus_uav_control"] |
                  frozenset({
                      "eigen", "geographiclib", "mavlink", "pkg-config",
                  }),
@@ -109,7 +109,7 @@ REQUIRED_MANIFEST_PHASES = {
         }),
     },
     "realsense_ros_gazebo": {
-        "build": REQUIRED_CATKIN_COMPONENTS["realsense_ros_gazebo"] |
+        "build": EXPECTED_CATKIN_COMPONENTS["realsense_ros_gazebo"] |
                  frozenset({"boost"}),
         "export": frozenset({
             "boost",
@@ -128,9 +128,20 @@ REQUIRED_MANIFEST_PHASES = {
             "sensor_msgs",
         }),
     },
+    "prometheus_gazebo": {
+        "build": frozenset(),
+        "export": frozenset(),
+        "exec": frozenset({
+            "gazebo_plugins",
+            "gazebo_ros",
+            "python3-jinja2",
+            "python3-numpy",
+            "realsense_ros_gazebo",
+        }),
+    },
 }
 
-REQUIRED_CATKIN_EXPORTS = {
+EXPECTED_CATKIN_EXPORTS = {
     "prometheus_msgs": frozenset({
         "actionlib_msgs",
         "geometry_msgs",
@@ -160,16 +171,58 @@ REQUIRED_CATKIN_EXPORTS = {
     }),
 }
 
-REQUIRED_GAZEBO_RUNTIME_DEPENDENCIES = frozenset({
-    "gazebo_plugins",
-    "gazebo_ros",
-    "mavros",
-    "python3-jinja2",
-    "python3-numpy",
-    "realsense_ros_gazebo",
-    "rviz",
-    "tf",
+EXPECTED_CATKIN_PACKAGE_FIELDS = {
+    "prometheus_msgs": {
+        "INCLUDE_DIRS": frozenset(),
+        "LIBRARIES": frozenset(),
+        "CATKIN_DEPENDS": EXPECTED_CATKIN_EXPORTS["prometheus_msgs"],
+        "DEPENDS": frozenset(),
+    },
+    "prometheus_gazebo": {
+        "INCLUDE_DIRS": frozenset(),
+        "LIBRARIES": frozenset(),
+        "CATKIN_DEPENDS": frozenset(),
+        "DEPENDS": frozenset(),
+    },
+    "prometheus_uav_control": {
+        "INCLUDE_DIRS": frozenset({
+            "include",
+            "vendor_upstream/common/include",
+            "vendor_upstream/communication/include",
+        }),
+        "LIBRARIES": frozenset({"uav_controller", "uav_estimator"}),
+        "CATKIN_DEPENDS": EXPECTED_CATKIN_EXPORTS[
+            "prometheus_uav_control"
+        ],
+        "DEPENDS": frozenset({"EIGEN3", "GEOGRAPHICLIB", "mavlink"}),
+    },
+    "realsense_ros_gazebo": {
+        "INCLUDE_DIRS": frozenset({"include"}),
+        "LIBRARIES": frozenset({"realsense_gazebo_plugin"}),
+        "CATKIN_DEPENDS": EXPECTED_CATKIN_EXPORTS[
+            "realsense_ros_gazebo"
+        ],
+        "DEPENDS": frozenset({"Boost"}),
+    },
+}
+
+EXPECTED_UAV_INCLUDE_TOKENS = frozenset({
+    "include",
+    "include/Position_Controller",
+    "vendor_upstream/common/include",
+    "vendor_upstream/communication/include",
+    "${catkin_INCLUDE_DIRS}",
+    "${EIGEN3_INCLUDE_DIRS}",
+    "${GEOGRAPHICLIB_INCLUDE_DIRS}",
+    "${mavlink_INCLUDE_DIRS}",
 })
+
+EXPECTED_NON_CATKIN_PACKAGES = {
+    "prometheus_msgs": frozenset(),
+    "prometheus_gazebo": frozenset(),
+    "prometheus_uav_control": frozenset({"Eigen3", "mavlink", "PkgConfig"}),
+    "realsense_ros_gazebo": frozenset({"Boost"}),
+}
 
 EXPECTED_MSG_MANIFEST_PHASES = {
     "build": EXPECTED_MSG_COMPONENTS,
@@ -178,21 +231,21 @@ EXPECTED_MSG_MANIFEST_PHASES = {
              {"message_runtime"}),
 }
 
-REQUIRED_INSTALL_DIRECTORIES = {
+EXPECTED_INSTALL_DIRECTORIES = {
+    "prometheus_msgs": frozenset(),
     "prometheus_gazebo": frozenset({
         "config",
         "gazebo_models",
         "gazebo_worlds",
-        "launch_basic",
-        "launch_fmt",
-        "launch_test",
-        "launch_uav_with_sensor",
+        "scripts",
     }),
     "prometheus_uav_control": frozenset({
         "include",
         "launch",
         "launch_controller_test",
         "meshes",
+        "vendor_upstream/common/include",
+        "vendor_upstream/communication/include",
     }),
     "realsense_ros_gazebo": frozenset({
         "include/realsense_gazebo_plugin",
@@ -385,7 +438,13 @@ def _catkin_components(package):
         if tokens and tokens[0] == "catkin":
             if "COMPONENTS" not in tokens:
                 return frozenset()
-            return frozenset(tokens[tokens.index("COMPONENTS") + 1:])
+            result = []
+            stop = {"OPTIONAL_COMPONENTS", "NO_POLICY_SCOPE"}
+            for token in tokens[tokens.index("COMPONENTS") + 1:]:
+                if token in stop:
+                    break
+                result.append(token)
+            return frozenset(result)
     raise AssertionError("%s has no find_package(catkin ...)" % package)
 
 
@@ -424,13 +483,27 @@ def _all_manifest_dependencies(package):
     return frozenset().union(*_manifest_dependencies(package).values())
 
 
+def _manifest_buildtools(package):
+    root = ET.parse(str(P450 / package / "package.xml")).getroot()
+    return frozenset(
+        (element.text or "").strip()
+        for element in root.findall("buildtool_depend")
+        if (element.text or "").strip()
+    )
+
+
 def _install_directory_sources(package):
     result = []
+    stop = {
+        "COMPONENT", "CONFIGURATIONS", "DESTINATION", "EXCLUDE_FROM_ALL",
+        "FILES_MATCHING", "MESSAGE_NEVER", "OPTIONAL", "PATTERN", "REGEX",
+        "TYPE", "USE_SOURCE_PERMISSIONS",
+    }
     for tokens in _commands(package, "install"):
         if not tokens or tokens[0] != "DIRECTORY":
             continue
         for token in tokens[1:]:
-            if token == "DESTINATION":
+            if token in stop:
                 break
             result.append(token.replace("${PROJECT_NAME}", package))
     return tuple(result)
@@ -445,6 +518,22 @@ def _catkin_installed_programs(package):
             if token == "DESTINATION":
                 break
             result.append(token)
+    return frozenset(result)
+
+
+def _installed_file_sources(package):
+    result = set(_catkin_installed_programs(package))
+    stop = {
+        "COMPONENT", "CONFIGURATIONS", "DESTINATION", "EXCLUDE_FROM_ALL",
+        "OPTIONAL", "PERMISSIONS", "RENAME", "TYPE",
+    }
+    for tokens in _commands(package, "install"):
+        if not tokens or tokens[0] not in {"FILES", "PROGRAMS"}:
+            continue
+        for token in tokens[1:]:
+            if token in stop:
+                break
+            result.add(token.replace("${PROJECT_NAME}", package))
     return frozenset(result)
 
 
@@ -497,6 +586,34 @@ def _catkin_exported_libraries(package):
     return _catkin_package_field(package, "LIBRARIES")
 
 
+def _has_required_cxx17_contract(package):
+    settings = {
+        tokens[0]: tuple(tokens[1:])
+        for tokens in _commands(package, "set")
+        if tokens
+    }
+    if (settings.get("CMAKE_CXX_STANDARD") == ("17",) and
+            settings.get("CMAKE_CXX_STANDARD_REQUIRED") == ("ON",)):
+        return True
+
+    expected_targets = frozenset(EXPECTED_TARGETS[package])
+    feature_targets = frozenset(
+        tokens[0]
+        for tokens in _commands(package, "target_compile_features")
+        if tokens and "cxx_std_17" in tokens[1:]
+    )
+    property_targets = set()
+    for tokens in _commands(package, "set_target_properties"):
+        if "PROPERTIES" not in tokens:
+            continue
+        split = tokens.index("PROPERTIES")
+        properties = dict(zip(tokens[split + 1::2], tokens[split + 2::2]))
+        if (properties.get("CXX_STANDARD") == "17" and
+                properties.get("CXX_STANDARD_REQUIRED") == "ON"):
+            property_targets.update(tokens[:split])
+    return expected_targets <= (feature_targets | property_targets)
+
+
 class CMakeContractParserTest(unittest.TestCase):
     def test_comments_quotes_brackets_and_install_export_are_structural(self):
         commands = _cmake_commands_from_text(r'''
@@ -540,23 +657,11 @@ class P450BuildContractTest(unittest.TestCase):
             for tokens in _commands(package, "include_directories")
             for token in tokens
         )
-        required_includes = frozenset({
-            "vendor_upstream/common/include",
-            "vendor_upstream/communication/include",
-        })
-        self.assertFalse(
-            required_includes - include_tokens,
-            "src/p450/prometheus_uav_control/CMakeLists.txt: frozen vendor "
-            "include paths are not declared structurally",
-        )
-        self.assertFalse(
-            {
-                token for token in include_tokens
-                if token.startswith("../common") or
-                token.startswith("../communication")
-            },
-            "src/p450/prometheus_uav_control/CMakeLists.txt: parent-relative "
-            "vendor include path escapes the package",
+        self.assertEqual(
+            EXPECTED_UAV_INCLUDE_TOKENS,
+            include_tokens,
+            "src/p450/prometheus_uav_control/CMakeLists.txt: include surface "
+            "must remain local plus declared dependency variables",
         )
         self.assertIn(
             "vendor_upstream/communication/src/param_manager.cpp",
@@ -590,7 +695,17 @@ class P450BuildContractTest(unittest.TestCase):
                     self.assertNotIn(stale, components)
                     self.assertNotIn(stale, dependencies)
             self.assertNotIn("generate_messages", command_names)
-            self.assertNotIn("%s_gencpp" % package, target_dependencies)
+            phantom_targets = {
+                token for token in target_dependencies
+                if ("gencpp" in token or
+                    re.search(r"(^|_)generate_messages(_|$)", token))
+            }
+            self.assertFalse(
+                phantom_targets,
+                "src/p450/%s/CMakeLists.txt: phantom generated-message "
+                "target dependencies %s" % (
+                    package, sorted(phantom_targets)),
+            )
         self.assertNotIn(
             "prometheus_msgs",
             _catkin_components("prometheus_gazebo"),
@@ -624,23 +739,27 @@ class P450BuildContractTest(unittest.TestCase):
                 )
 
     def test_compiled_dependencies_are_declared(self):
-        for package, required in REQUIRED_CATKIN_COMPONENTS.items():
-            missing_cmake = required - _catkin_components(package)
+        for package, expected in EXPECTED_CATKIN_COMPONENTS.items():
+            actual_cmake = _catkin_components(package)
             with self.subTest(package=package, declaration="CMake"):
-                self.assertFalse(
-                    missing_cmake,
-                    "src/p450/%s/CMakeLists.txt: missing direct Catkin "
-                    "components %s" % (package, sorted(missing_cmake)),
+                self.assertEqual(
+                    expected,
+                    actual_cmake,
+                    "src/p450/%s/CMakeLists.txt: direct Catkin component "
+                    "closure differs; expected=%s actual=%s" % (
+                        package, sorted(expected), sorted(actual_cmake)),
                 )
             manifest = _manifest_dependencies(package)
             for phase in ("build", "export", "exec"):
-                required_phase = REQUIRED_MANIFEST_PHASES[package][phase]
-                missing = required_phase - manifest[phase]
+                expected_phase = EXPECTED_MANIFEST_PHASES[package][phase]
                 with self.subTest(package=package, phase=phase):
-                    self.assertFalse(
-                        missing,
-                        "src/p450/%s/package.xml: missing %s dependencies %s"
-                        % (package, phase, sorted(missing)),
+                    self.assertEqual(
+                        expected_phase,
+                        manifest[phase],
+                        "src/p450/%s/package.xml: %s dependency closure "
+                        "differs; expected=%s actual=%s" % (
+                            package, phase, sorted(expected_phase),
+                            sorted(manifest[phase])),
                     )
 
         uav_manifest = _manifest_dependencies("prometheus_uav_control")
@@ -651,34 +770,65 @@ class P450BuildContractTest(unittest.TestCase):
             "to prometheus_msgs",
         )
 
-    def test_catkin_package_exports_match_public_build_surface(self):
-        for package, required in REQUIRED_CATKIN_EXPORTS.items():
-            actual = _catkin_package_field(package, "CATKIN_DEPENDS")
-            missing = required - actual
-            with self.subTest(package=package):
-                self.assertFalse(
-                    missing,
-                    "src/p450/%s/CMakeLists.txt: catkin_package is missing "
-                    "public CATKIN_DEPENDS %s" % (package, sorted(missing)),
+    def test_build_tool_and_system_dependency_surfaces_are_exact(self):
+        for package, expected in EXPECTED_NON_CATKIN_PACKAGES.items():
+            actual = frozenset(
+                tokens[0]
+                for tokens in _commands(package, "find_package")
+                if tokens and tokens[0] != "catkin"
+            )
+            with self.subTest(package=package, dependency_kind="system"):
+                self.assertEqual(
+                    expected,
+                    actual,
+                    "src/p450/%s/CMakeLists.txt: non-Catkin find_package "
+                    "surface differs; expected=%s actual=%s" % (
+                        package, sorted(expected), sorted(actual)),
+                )
+            with self.subTest(package=package, dependency_kind="buildtool"):
+                self.assertEqual(
+                    frozenset({"catkin"}),
+                    _manifest_buildtools(package),
+                    "src/p450/%s/package.xml: build tool closure must be "
+                    "exactly catkin" % package,
                 )
 
+        self.assertEqual(
+            (("GEOGRAPHICLIB", "REQUIRED", "geographiclib"),),
+            _commands("prometheus_uav_control", "pkg_check_modules"),
+            "src/p450/prometheus_uav_control/CMakeLists.txt: GeographicLib "
+            "must resolve through its available pkg-config module",
+        )
+
+    def test_catkin_package_exports_match_public_build_surface(self):
+        for package, fields in EXPECTED_CATKIN_PACKAGE_FIELDS.items():
+            for field, expected in fields.items():
+                actual = _catkin_package_field(package, field)
+                with self.subTest(package=package, field=field):
+                    self.assertEqual(
+                        expected,
+                        actual,
+                        "src/p450/%s/CMakeLists.txt: catkin_package %s "
+                        "differs; expected=%s actual=%s" % (
+                            package, field, sorted(expected), sorted(actual)),
+                    )
+
     def test_gazebo_assets_declare_runtime_consumers(self):
-        runtime = _manifest_dependencies("prometheus_gazebo")["exec"]
-        missing = REQUIRED_GAZEBO_RUNTIME_DEPENDENCIES - runtime
-        self.assertFalse(
-            missing,
-            "src/p450/prometheus_gazebo/package.xml: missing runtime "
-            "dependencies %s" % sorted(missing),
+        package = "prometheus_gazebo"
+        self.assertEqual(frozenset(), _catkin_components(package))
+        self.assertEqual(
+            EXPECTED_MANIFEST_PHASES[package],
+            _manifest_dependencies(package),
+            "src/p450/prometheus_gazebo/package.xml: asset-only dependency "
+            "closure must be exact",
         )
 
     def test_uav_control_requires_cxx17(self):
-        settings = {
-            tokens[0]: tuple(tokens[1:])
-            for tokens in _commands("prometheus_uav_control", "set")
-            if tokens
-        }
-        self.assertEqual(("17",), settings.get("CMAKE_CXX_STANDARD"))
-        self.assertEqual(("ON",), settings.get("CMAKE_CXX_STANDARD_REQUIRED"))
+        self.assertTrue(
+            _has_required_cxx17_contract("prometheus_uav_control"),
+            "src/p450/prometheus_uav_control/CMakeLists.txt: every compiled "
+            "target must require C++17",
+        )
 
     def test_aerial_perception_declares_d435_runtime(self):
         runtime = _manifest_dependencies("brick_aerial_perception")["exec"]
@@ -712,18 +862,49 @@ class P450BuildContractTest(unittest.TestCase):
                         "not exist: %s" % (package, relative),
                     )
 
-        for package, required in REQUIRED_INSTALL_DIRECTORIES.items():
+        for package, expected in EXPECTED_INSTALL_DIRECTORIES.items():
             actual = frozenset(
                 relative.rstrip("/")
                 for relative in _install_directory_sources(package)
             )
-            missing = required - actual
-            with self.subTest(package=package, contract="required-resources"):
-                self.assertFalse(
-                    missing,
-                    "src/p450/%s/CMakeLists.txt: missing install directories "
-                    "%s" % (package, sorted(missing)),
+            with self.subTest(package=package, contract="exact-resources"):
+                self.assertEqual(
+                    expected,
+                    actual,
+                    "src/p450/%s/CMakeLists.txt: installed directory surface "
+                    "differs; expected=%s actual=%s" % (
+                        package, sorted(expected), sorted(actual)),
                 )
+
+        for package in EXPECTED_INSTALL_DIRECTORIES:
+            for relative in _installed_file_sources(package):
+                with self.subTest(package=package, file=relative):
+                    self.assertTrue(
+                        (P450 / package / relative).is_file(),
+                        "src/p450/%s/CMakeLists.txt: installed file does not "
+                        "exist: %s" % (package, relative),
+                    )
+
+        for package, fields in EXPECTED_CATKIN_PACKAGE_FIELDS.items():
+            installed_sources = tuple(
+                (P450 / package / relative.rstrip("/")).resolve()
+                for relative in _install_directory_sources(package)
+            )
+            for relative in fields["INCLUDE_DIRS"]:
+                include_root = P450 / package / relative
+                with self.subTest(package=package, public_include=relative):
+                    self.assertTrue(include_root.is_dir())
+                for header in include_root.rglob("*"):
+                    if not header.is_file():
+                        continue
+                    self.assertTrue(
+                        any(source == header.resolve() or
+                            source in header.resolve().parents
+                            for source in installed_sources),
+                        "src/p450/%s/CMakeLists.txt: public header is not "
+                        "covered by install(DIRECTORY): %s" % (
+                            package, header.relative_to(P450 / package)),
+                    )
 
         self.assertIn(
             "scripts/jinja_gen.py",
@@ -733,14 +914,24 @@ class P450BuildContractTest(unittest.TestCase):
         )
 
     def test_runtime_targets_are_installed_and_realsense_is_exported(self):
-        self.assertEqual(
-            frozenset(EXPECTED_TARGETS["prometheus_uav_control"]),
-            _installed_targets("prometheus_uav_control"),
-        )
-        self.assertEqual(
-            frozenset({"realsense_gazebo_plugin"}),
-            _installed_targets("realsense_ros_gazebo"),
-        )
+        for package in EXPECTED_INSTALL_DIRECTORIES:
+            installed = _installed_targets(package)
+            built = frozenset(_targets(package))
+            with self.subTest(package=package, contract="no-ghost-target"):
+                self.assertFalse(
+                    installed - built,
+                    "src/p450/%s/CMakeLists.txt: install(TARGETS) contains "
+                    "targets that are not built: %s" % (
+                        package, sorted(installed - built)),
+                )
+        for package, expected in EXPECTED_TARGETS.items():
+            with self.subTest(package=package):
+                self.assertEqual(
+                    frozenset(expected),
+                    _installed_targets(package),
+                    "src/p450/%s/CMakeLists.txt: installed target surface "
+                    "must exactly match built targets" % package,
+                )
         self.assertEqual(
             frozenset({"realsense_gazebo_plugin"}),
             _catkin_exported_libraries("realsense_ros_gazebo"),
