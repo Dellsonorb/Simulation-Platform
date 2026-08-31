@@ -60,6 +60,15 @@
     "src/p450/brick_aerial_perception/CMakeLists.txt": "0cff7fb968392b7e3e8df271aaa6d6ded3bf30e769802084d7f5b367dc2a0c3a",
     "src/p450/brick_aerial_perception/README.md": "c4e020f0cdc7bdc0ca61a383f7da99b8288e540f460b64104be6985d282da105",
     "src/p450/brick_aerial_perception/launch/m1_aerial_perception.launch": "0d387206d34248ab77baf12c1c4f4a4ecc6f46842ed7f21e585228e260fc3ced",
-    "src/p450/brick_aerial_perception/test/test_ros_contract.py": "3f53de5076dc17858c6519bd16ea696aca9e03f8b862e6d9d79c649c3b5c1517"
+    "src/p450/brick_aerial_perception/package.xml": "316c8f2e581f8301d16605a917c747a6713b2f82d535b7883e5bd3068ee573a0",
+    "src/p450/brick_aerial_perception/test/test_ros_contract.py": "3f53de5076dc17858c6519bd16ea696aca9e03f8b862e6d9d79c649c3b5c1517",
+    "src/p450/prometheus_gazebo/CMakeLists.txt": "f786b362518d30957c9849d1e2598819e216b92dd91635079e665feeeec661af",
+    "src/p450/prometheus_gazebo/package.xml": "5833f3c352f62427e5219d16d94cfc7b3dbe16b9b452bfc57d2647352ed968e1",
+    "src/p450/prometheus_msgs/CMakeLists.txt": "bf24e658dd1c6386442fadf45e2dd01f026467eb2eb53f5a8abb32a67e50130c",
+    "src/p450/prometheus_msgs/package.xml": "138647587275e9bf4b1085051deeadfd10a9ad66e8764d6e3380cd2c8445da01",
+    "src/p450/prometheus_uav_control/CMakeLists.txt": "23495ba6dfa906ad9516c5326e7fd808b332806260c95a2d6c8bbf294a26d9c6",
+    "src/p450/prometheus_uav_control/package.xml": "a49a6ca0f185f56e0af76aa1113dc857d6ca77603fbac9a8b660829c87c83b0f",
+    "src/p450/realsense_ros_gazebo/CMakeLists.txt": "01962849792d0276cd322ce9682c4cb63106710225e963dfea5f900c02bf4f53",
+    "src/p450/realsense_ros_gazebo/package.xml": "9fad1bcb932c08fc67d2e7e2630acc96f95a83ec8053a4c478a7ca300426bc3e"
   }
 }

@@ -1,89 +1,131 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.0.2)
 project(prometheus_uav_control)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 find_package(catkin REQUIRED COMPONENTS
-  message_generation  
-  roscpp
+  diagnostic_updater
   geometry_msgs
-  nav_msgs
-  sensor_msgs
   mavros
-  std_msgs
-  std_srvs
-  tf
-  tf2_ros
-  tf2_eigen
   mavros_msgs
-  prometheus_msgs
-  tf2_geometry_msgs
-)
-
-## System dependencies are found with CMake's conventions
-find_package(Boost REQUIRED COMPONENTS system)
-find_package(mavlink REQUIRED)
-
-################################################
-## Declare ROS messages, services and actions ##
-################################################
-
-## Generate added messages and services with any dependencies listed here
-generate_messages(
-  DEPENDENCIES
-  geometry_msgs 
   nav_msgs
+  prometheus_msgs
+  roscpp
   sensor_msgs
   std_msgs
-  prometheus_msgs
+  tf2_geometry_msgs
+  tf2_ros
+  visualization_msgs
 )
+find_package(Eigen3 REQUIRED)
+find_package(mavlink REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GEOGRAPHICLIB REQUIRED geographiclib)
 
 catkin_package(
-  INCLUDE_DIRS include
-  CATKIN_DEPENDS message_runtime
+  INCLUDE_DIRS
+  include
+  vendor_upstream/common/include
+  vendor_upstream/communication/include
+  LIBRARIES
+  uav_controller
+  uav_estimator
+  CATKIN_DEPENDS
+  geometry_msgs
+  mavros
+  mavros_msgs
+  nav_msgs
+  prometheus_msgs
+  roscpp
+  sensor_msgs
+  std_msgs
+  tf2_geometry_msgs
+  tf2_ros
+  visualization_msgs
+  DEPENDS
+  EIGEN3
+  GEOGRAPHICLIB
+  mavlink
 )
-###########
-## Build ##
-###########
+
 include_directories(
   include
-  ${catkin_INCLUDE_DIRS}
   include/Position_Controller
-  ../common/include
-  ../communication/include
+  vendor_upstream/common/include
+  vendor_upstream/communication/include
+  ${catkin_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+  ${GEOGRAPHICLIB_INCLUDE_DIRS}
   ${mavlink_INCLUDE_DIRS}
 )
 
+add_library(
+  uav_controller
+  src/uav_controller.cpp
+  vendor_upstream/communication/src/param_manager.cpp
+)
+add_dependencies(uav_controller ${catkin_EXPORTED_TARGETS})
+target_link_libraries(uav_controller ${catkin_LIBRARIES})
 
-###############################
-##      声明可执行cpp文件     ##
-###############################
-add_library(uav_controller src/uav_controller.cpp ../communication/src/param_manager.cpp)
 add_library(uav_estimator src/uav_estimator.cpp)
-target_link_libraries(uav_estimator ${catkin_LIBRARIES})
+add_dependencies(uav_estimator ${catkin_EXPORTED_TARGETS})
+target_link_libraries(
+  uav_estimator
+  ${catkin_LIBRARIES}
+  ${GEOGRAPHICLIB_LIBRARIES}
+)
 
 add_executable(uav_control_main src/uav_control_node.cpp)
-add_dependencies(uav_control_main prometheus_uav_control_gencpp)
-target_link_libraries(uav_control_main ${catkin_LIBRARIES})
-target_link_libraries(uav_control_main uav_controller)
-target_link_libraries(uav_control_main uav_estimator)
+add_dependencies(uav_control_main ${catkin_EXPORTED_TARGETS})
+target_link_libraries(
+  uav_control_main
+  uav_controller
+  uav_estimator
+  ${catkin_LIBRARIES}
+)
 
 add_executable(uav_command_pub utils/uav_command_pub.cpp)
-add_dependencies(uav_command_pub prometheus_uav_control_gencpp)
+add_dependencies(uav_command_pub ${catkin_EXPORTED_TARGETS})
 target_link_libraries(uav_command_pub ${catkin_LIBRARIES})
 
 add_executable(rc_test utils/rc_test.cpp)
-add_dependencies(rc_test prometheus_uav_control_gencpp)
+add_dependencies(rc_test ${catkin_EXPORTED_TARGETS})
 target_link_libraries(rc_test ${catkin_LIBRARIES})
 
 add_executable(joy_node utils/joy_node.cpp)
+add_dependencies(joy_node ${catkin_EXPORTED_TARGETS})
 target_link_libraries(joy_node ${catkin_LIBRARIES})
 
-## Mark cpp header files for installation
-install(DIRECTORY include/${PROJECT_NAME}/
-  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-  FILES_MATCHING PATTERN "*.h"
+install(
+  TARGETS
+  uav_controller
+  uav_estimator
+  uav_control_main
+  uav_command_pub
+  rc_test
+  joy_node
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
-## Mark other files for installation (e.g. launch and bag files, etc.)
-install(DIRECTORY launch/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
+install(
+  DIRECTORY include/
+  DESTINATION ${CATKIN_GLOBAL_INCLUDE_DESTINATION}
+)
+
+install(
+  DIRECTORY
+  vendor_upstream/common/include/
+  vendor_upstream/communication/include/
+  DESTINATION ${CATKIN_GLOBAL_INCLUDE_DESTINATION}
+)
+
+install(
+  DIRECTORY
+  launch
+  launch_controller_test
+  meshes
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )

@@ -2,21 +2,19 @@
 <package format="2">
   <name>prometheus_gazebo</name>
   <version>0.0.0</version>
-  <description>The prometheus_gazebo package</description>
+  <description>P450 Gazebo models, worlds, configuration, and launch assets.</description>
 
   <maintainer email="qiyh8@mail.sysu.edu.cn">Yuhua Qi</maintainer>
-
   <license>TODO</license>
 
-  <build_depend>message_generation</build_depend>
-  <exec_depend>message_runtime</exec_depend>
   <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>std_msgs</build_depend>
-  <build_export_depend>std_msgs</build_export_depend>
-  <exec_depend>std_msgs</exec_depend>
-  <exec_depend>octomap_server</exec_depend>
-  
-  <export>
-    <!-- Other tools can request additional information be placed here -->
-  </export>
+
+  <exec_depend>gazebo_plugins</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>mavros</exec_depend>
+  <exec_depend>python3-jinja2</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>realsense_ros_gazebo</exec_depend>
+  <exec_depend>rviz</exec_depend>
+  <exec_depend>tf</exec_depend>
 </package>

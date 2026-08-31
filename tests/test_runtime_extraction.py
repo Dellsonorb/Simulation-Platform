@@ -66,8 +66,17 @@ EXACT_REMOVED = frozenset({
 EXACT_MODIFIED = frozenset({
     "src/p450/brick_aerial_perception/CMakeLists.txt",
     "src/p450/brick_aerial_perception/launch/m1_aerial_perception.launch",
+    "src/p450/brick_aerial_perception/package.xml",
     "src/p450/brick_aerial_perception/README.md",
     "src/p450/brick_aerial_perception/test/test_ros_contract.py",
+    "src/p450/prometheus_gazebo/CMakeLists.txt",
+    "src/p450/prometheus_gazebo/package.xml",
+    "src/p450/prometheus_msgs/CMakeLists.txt",
+    "src/p450/prometheus_msgs/package.xml",
+    "src/p450/prometheus_uav_control/CMakeLists.txt",
+    "src/p450/prometheus_uav_control/package.xml",
+    "src/p450/realsense_ros_gazebo/CMakeLists.txt",
+    "src/p450/realsense_ros_gazebo/package.xml",
     "src/ground/bunker_navigation/CMakeLists.txt",
     "src/ground/bunker_navigation/test/test_configuration.py",
     "src/ground/brick_rgbd_perception/CMakeLists.txt",
@@ -264,7 +273,7 @@ class RuntimeExtractionTest(unittest.TestCase):
         self.assertEqual(sorted(EXACT_MODIFIED),
                          list(overlay["modified"]))
         self.assertEqual(42, len(overlay["removed"]))
-        self.assertEqual(13, len(overlay["modified"]))
+        self.assertEqual(22, len(overlay["modified"]))
 
     def test_removed_files_are_tracked_upstream_and_absent_now(self):
         recorded = self.provenance["files"]

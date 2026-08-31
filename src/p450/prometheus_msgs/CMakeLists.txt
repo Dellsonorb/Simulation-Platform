@@ -2,21 +2,13 @@ cmake_minimum_required(VERSION 2.8.3)
 project(prometheus_msgs)
 
 find_package(catkin REQUIRED COMPONENTS
-  message_generation  
-  roscpp
-  geometry_msgs
   actionlib_msgs
+  geometry_msgs
+  message_generation
   sensor_msgs
-  nav_msgs
   std_msgs
-  std_srvs
-  tf2_ros
-  tf2_eigen
-  mavros_msgs
 )
 
-find_package(Boost REQUIRED COMPONENTS system)
-find_package(PCL REQUIRED)
 add_message_files(
   DIRECTORY msg
   FILES
@@ -45,11 +37,9 @@ add_message_files(
   OffsetPose.msg
   GPSData.msg
 
-  # UWB msg
   LinktrackNode2.msg
   LinktrackNodeframe2.msg
 
-  #communication
   DetectionInfoSub.msg
   GimbalControl.msg
   GimbalState.msg
@@ -63,17 +53,14 @@ add_message_files(
   CustomDataSegment.msg
   ParamSettings.msg
 
-  #spirecv-ros msg
   ROI.msg
   Target.msg
   TargetsInFrame.msg
   StartScript.msg
 
-  #livox mid360 msg
   LivoxCustomMsg.msg
   LivoxCustomPoint.msg
-  
-  #su17 depth_filter msg
+
   DepthCompressed.msg
 )
 
@@ -91,36 +78,19 @@ add_action_files(
   CheckForObjects.action
 )
 
-generate_messages(DEPENDENCIES
+generate_messages(
   DEPENDENCIES
   actionlib_msgs
-  geometry_msgs 
+  geometry_msgs
   sensor_msgs
   std_msgs
 )
 
 catkin_package(
   CATKIN_DEPENDS
-  message_runtime
   actionlib_msgs
   geometry_msgs
-  sensor_msgs
   message_runtime
+  sensor_msgs
   std_msgs
-)
-
-include_directories(
-  include
-  ${catkin_INCLUDE_DIRS}
-  ${PCL_INCLUDE_DIRS}
-)
-
-
-install(DIRECTORY include/${PROJECT_NAME}/
-  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-  FILES_MATCHING PATTERN "*.h"
-)
-
-install(DIRECTORY launch/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
 )
