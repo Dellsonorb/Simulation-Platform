@@ -856,6 +856,36 @@ class Mid360FutureRuntimeContractTest(unittest.TestCase):
             absolute_guard.group("body"),
             r"message\s*\(\s*FATAL_ERROR\b",
         )
+        ray_directory = re.search(
+            r"get_filename_component\s*\(\s*"
+            r"(?P<variable>[A-Za-z_][A-Za-z0-9_]*)\s+"
+            r"[\"']?\$\{%s\}[\"']?\s+DIRECTORY\s*\)"
+            % re.escape(ray_variable),
+            cmake,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(ray_directory)
+        ray_directory_variable = ray_directory.group("variable")
+        target_properties = re.search(
+            r"set_target_properties\s*\(\s*livox_laser_gazebo_plugins\s+"
+            r"PROPERTIES(?P<body>[^)]*)\)",
+            cmake,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(target_properties)
+        self.assertRegex(
+            target_properties.group("body"),
+            r"\bINSTALL_RPATH\s+[\"']?\$\{%s\}[\"']?"
+            % re.escape(ray_directory_variable),
+        )
+        for forbidden_rpath in (
+            "BUILD_RPATH",
+            "BUILD_WITH_INSTALL_RPATH",
+            "CMAKE_BUILD_RPATH",
+            "CMAKE_INSTALL_RPATH",
+        ):
+            with self.subTest(forbidden_rpath=forbidden_rpath):
+                self.assertNotIn(forbidden_rpath, raw_cmake)
         catkin = re.search(
             r"find_package\s*\(\s*catkin\s+REQUIRED\s+COMPONENTS(?P<body>.*?)\)",
             cmake,
@@ -936,6 +966,43 @@ class Mid360FutureRuntimeContractTest(unittest.TestCase):
         configured = 'frameName = sdf->Get<std::string>("frameName")'
         self.assertIn(configured, source)
         runtime_source = source[source.index(configured):]
+        normalization = re.search(
+            r"if\s*\(\s*!frameName\.empty\(\)\s*&&\s*"
+            r"frameName\.front\(\)\s*==\s*['\"]/['\"]\s*\)\s*\{"
+            r"(?P<body>.*?)\}",
+            runtime_source,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(normalization)
+        self.assertRegex(
+            normalization.group("body"),
+            r"frameName\.erase\s*\(\s*0\s*,\s*1\s*\)\s*;",
+        )
+        self.assertEqual(
+            1,
+            len(re.findall(r"frameName\.erase\s*\(", runtime_source)),
+        )
+        empty_guard = re.search(
+            r"if\s*\(\s*frameName\.empty\(\)\s*\)\s*\{"
+            r"(?P<body>.*?)\}",
+            runtime_source,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(empty_guard)
+        self.assertLess(normalization.start(), empty_guard.start())
+        self.assertRegex(empty_guard.group("body"), r"ROS_(?:ERROR|FATAL)")
+        self.assertIn("frameName", empty_guard.group("body"))
+        self.assertRegex(empty_guard.group("body"), r"\breturn\s*;")
+        configured_outputs = re.findall(
+            r"\b(?:scan_point|msg)\.header\.frame_id\s*=\s*"
+            r"frameName\s*;",
+            runtime_source,
+        )
+        self.assertEqual(4, len(configured_outputs))
+        self.assertNotRegex(
+            runtime_source,
+            r"\b(?:scan_point|msg)\.header\.frame_id\s*=\s*['\"]",
+        )
         self.assertNotRegex(
             runtime_source,
             r'(?:frameName|header\.frame_id)\s*=\s*"livox"',

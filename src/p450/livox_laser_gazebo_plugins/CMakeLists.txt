@@ -25,6 +25,11 @@ find_library(
 if(NOT GAZEBO_RAY_PLUGIN OR NOT IS_ABSOLUTE "${GAZEBO_RAY_PLUGIN}")
   message(FATAL_ERROR "Gazebo RayPlugin was not found at an absolute host library path")
 endif()
+get_filename_component(
+  GAZEBO_RAY_PLUGIN_DIR
+  "${GAZEBO_RAY_PLUGIN}"
+  DIRECTORY
+)
 
 catkin_package(
   INCLUDE_DIRS include
@@ -54,6 +59,10 @@ target_include_directories(
   ${PCL_INCLUDE_DIRS}
 )
 add_dependencies(livox_laser_gazebo_plugins ${catkin_EXPORTED_TARGETS})
+set_target_properties(
+  livox_laser_gazebo_plugins
+  PROPERTIES INSTALL_RPATH "${GAZEBO_RAY_PLUGIN_DIR}"
+)
 target_link_libraries(
   livox_laser_gazebo_plugins
   ${catkin_LIBRARIES}
