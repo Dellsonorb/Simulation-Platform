@@ -10,6 +10,9 @@ from tools.runtime_manifest import RuntimeManifest
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_COMMIT = "6809c15e3919d1aa3acb6518ad61c49e4150435f"
+EXPECTED_BASE_PROVENANCE_SHA256 = (
+    "6cc35f32f30cc1970350eb4daa6f678b35cedc900ba1c645c0c159bec97abd20"
+)
 FORBIDDEN_PATH_PARTS = {
     ".git",
     "build",
@@ -110,10 +113,14 @@ class ImportedLayoutTest(unittest.TestCase):
             path = ROOT / item.destination
             self.assertFalse(path.is_symlink(), item.destination)
 
-    def test_provenance_exactly_covers_and_hashes_imported_files(self):
+    def test_overlay_exactly_covers_runtime_changes_from_frozen_import(self):
         provenance_path = ROOT / "config/import_provenance.json"
+        overlay_path = ROOT / "config/runtime_overlay.json"
         self.assertTrue(provenance_path.is_file(), provenance_path.as_posix())
+        self.assertEqual(EXPECTED_BASE_PROVENANCE_SHA256,
+                         _sha256(provenance_path))
         provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        overlay = json.loads(overlay_path.read_text(encoding="utf-8"))
 
         self.assertEqual(1, provenance["schema_version"])
         self.assertEqual(EXPECTED_COMMIT, provenance["upstream_commit"])
@@ -127,19 +134,30 @@ class ImportedLayoutTest(unittest.TestCase):
             sorted(recorded_files),
             "provenance file keys are not sorted",
         )
+        self.assertEqual(1, overlay["schema_version"])
+        self.assertEqual("config/import_provenance.json",
+                         overlay["base_provenance"])
+        self.assertEqual(EXPECTED_BASE_PROVENANCE_SHA256,
+                         overlay["base_provenance_sha256"])
+        self.assertEqual(EXPECTED_COMMIT, overlay["upstream_commit"])
+        removed = overlay["removed"]
+        modified = overlay["modified"]
+        self.assertEqual(sorted(removed), removed)
+        self.assertEqual(sorted(modified), list(modified))
+        self.assertTrue(set(removed).isdisjoint(modified))
 
-        expected_files = set()
+        actual_files = set()
         for spec in self.imported_packages:
             package_root = ROOT / spec.destination
             for path in package_root.rglob("*"):
                 if _is_regular_file(path):
-                    expected_files.add(path.relative_to(ROOT).as_posix())
+                    actual_files.add(path.relative_to(ROOT).as_posix())
         for item in self.manifest.auxiliary_imports:
             path = ROOT / item.destination
             if _is_regular_file(path):
-                expected_files.add(item.destination)
+                actual_files.add(item.destination)
 
-        self.assertEqual(expected_files, set(recorded_files))
+        self.assertEqual(set(recorded_files) - set(removed), actual_files)
         self.assertNotIn(
             "config/import_provenance.json",
             recorded_files,
@@ -150,7 +168,18 @@ class ImportedLayoutTest(unittest.TestCase):
             "src/demos/.gitkeep",
         ):
             self.assertNotIn(marker, recorded_files)
+        for relative in removed:
+            self.assertIn(relative, recorded_files)
+            self.assertFalse((ROOT / relative).exists(), relative)
         for relative, expected_digest in recorded_files.items():
+            if relative in removed:
+                continue
+            if relative in modified:
+                self.assertNotEqual(expected_digest, modified[relative],
+                                    relative)
+                self.assertEqual(modified[relative],
+                                 _sha256(ROOT / relative), relative)
+                continue
             self.assertEqual(
                 expected_digest,
                 _sha256(ROOT / relative),

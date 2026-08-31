@@ -4,8 +4,6 @@
   <arg name="rviz_enable" default="true"/>
   <arg name="autostart" default="true"/>
   <arg name="require_sampling_state" default="true"/>
-  <arg name="validation_enable" default="false"/>
-  <arg name="validation_output" default="/tmp/m1_validation.json"/>
   <arg name="world" default="$(find brick_aerial_perception)/worlds/m1_brick.world"/>
 
   <include file="$(find prometheus_gazebo)/launch_uav_with_sensor/sitl_p450_d435i.launch">
@@ -44,14 +42,6 @@
     <param name="uav_id" value="$(arg uav_id)"/>
     <param name="require_sampling_state" value="$(arg require_sampling_state)"/>
     <rosparam command="load" file="$(find brick_aerial_perception)/config/perception.yaml"/>
-  </node>
-
-  <node if="$(arg validation_enable)" pkg="brick_aerial_perception"
-        type="m1_validation_monitor.py" name="m1_validation_monitor" output="screen">
-    <param name="uav_id" value="$(arg uav_id)"/>
-    <param name="output_json" value="$(arg validation_output)"/>
-    <rosparam command="load"
-              file="$(find brick_aerial_perception)/config/validation_scenarios.yaml"/>
   </node>
 
   <group if="$(arg rviz_enable)">

@@ -11,6 +11,10 @@ PACKAGE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class ConfigurationTest(unittest.TestCase):
+    def read(self, *parts):
+        with open(os.path.join(PACKAGE, *parts)) as stream:
+            return stream.read()
+
     def test_demo_composes_existing_modules_without_duplicate_robot(self):
         path = os.path.join(PACKAGE, 'launch', 'ground_pick_demo.launch')
         root = ET.parse(path).getroot()
@@ -26,7 +30,7 @@ class ConfigurationTest(unittest.TestCase):
         self.assertEqual('true', arguments['navigation_laser'])
         self.assertEqual('true', arguments['spawn_controllers'])
         self.assertEqual('true', arguments['mobile_manipulation_startup'])
-        text = open(path).read()
+        text = self.read('launch', 'ground_pick_demo.launch')
         self.assertNotIn('visual_pick_demo.launch', text)
         self.assertNotIn('approach_pose_demo.launch', text)
         self.assertNotIn('manual_brick_pose_publisher', text)
@@ -58,8 +62,7 @@ class ConfigurationTest(unittest.TestCase):
         self.assertLess(float(params['reach_min']), 0.67)
 
     def test_mission_runtime_uses_trajectory_without_gazebo_teleport(self):
-        source = open(os.path.join(
-            PACKAGE, 'scripts', 'ground_pick_node.py')).read()
+        source = self.read('scripts', 'ground_pick_node.py')
         self.assertNotIn("rospy.delete_param('/gazebo_ros_control/pid_gains')",
                          source)
         self.assertNotIn("stopped_velocity_tolerance', -1.0", source)
@@ -79,12 +82,11 @@ class ConfigurationTest(unittest.TestCase):
         self.assertIn("String(data='RELEASE')", source)
         self.assertIn("String(data='ENABLE_GRAVITY')", source)
 
-    def test_refine_gate_is_configured_for_staging_not_formal_pose(self):
-        path = os.path.join(PACKAGE, 'config', 'mission.yaml')
-        config = yaml.safe_load(open(path))
+    def test_refine_gate_preserves_legacy_pick_and_approved_topics(self):
+        config = yaml.safe_load(self.read('config', 'mission.yaml'))
         self.assertEqual('/ground_pick/refined_brick_pose',
                          config['refine_output_topic'])
-        self.assertEqual('/brick_pose', config['formal_pose_topic'])
+        self.assertEqual('/brick_pose', config['legacy_pick_pose_topic'])
         self.assertEqual('/ground_pick/approved_brick_pose',
                          config['approved_pose_topic'])
         self.assertEqual('aubo_i5_base_link',
@@ -93,34 +95,14 @@ class ConfigurationTest(unittest.TestCase):
         self.assertEqual(5.0, config['observation_duration'])
 
     def test_launch_does_not_provide_respawn_only_description(self):
-        text = open(os.path.join(
-            PACKAGE, 'launch', 'ground_pick_demo.launch')).read()
+        text = self.read('launch', 'ground_pick_demo.launch')
         self.assertNotIn('ground_pick_manipulation_description', text)
 
     def test_model_identity_is_preserved_through_manipulation(self):
-        source = open(os.path.join(
-            PACKAGE, 'scripts', 'ground_pick_node.py')).read()
+        source = self.read('scripts', 'ground_pick_node.py')
         self.assertNotIn('/gazebo/delete_model', source)
         self.assertNotIn('/gazebo/spawn_urdf_model', source)
         self.assertIn('wait_mobile_manipulation_state', source)
-
-    def test_matrix_has_ten_valid_and_three_failure_controls(self):
-        path = os.path.join(PACKAGE, 'config', 'mission_scenarios.yaml')
-        config = yaml.safe_load(open(path))
-        valid = [item for item in config['scenarios']
-                 if item['expect_success']]
-        controls = [item for item in config['scenarios']
-                    if not item['expect_success']]
-        self.assertGreaterEqual(len(valid), 10)
-        self.assertEqual(
-            {'navigation_failed', 'perception_rejected', 'planning_failed'},
-            {item['expected_failure'] for item in controls})
-        self.assertEqual(len(config['scenarios']),
-                         len({item['id'] for item in config['scenarios']}))
-        for relative in ('scripts/ground_pick_trial_monitor.py',
-                         'scripts/run_ground_pick_matrix.py'):
-            self.assertTrue(os.access(os.path.join(PACKAGE, relative), os.X_OK))
-        ET.parse(os.path.join(PACKAGE, 'launch', 'ground_pick_trial.launch'))
 
     def test_orchestrator_does_not_reimplement_perception_or_grasp(self):
         path = os.path.join(PACKAGE, 'scripts', 'ground_pick_node.py')
@@ -131,7 +113,7 @@ class ConfigurationTest(unittest.TestCase):
             PACKAGE, 'scripts', 'ground_pick_orchestrator.py')))
         self.assertFalse(os.path.exists(os.path.join(
             PACKAGE, 'scripts', 'ground_pick_orchestrator.pyc')))
-        text = open(path).read()
+        text = self.read('scripts', 'ground_pick_node.py')
         self.assertNotIn('ApproximateTimeSynchronizer', text)
         self.assertNotIn('PointCloud2', text)
         self.assertNotIn('MoveGroupInterface', text)
@@ -150,11 +132,10 @@ class ConfigurationTest(unittest.TestCase):
         approve = text[text.index('    def manipulation_worker_main(self'):
                        text.index('    def refine_status_callback')]
         self.assertNotIn('respawn', approve)
-        self.assertIn('self.formal_pose_pub.publish(message)', approve)
+        self.assertIn('self.legacy_pick_pose_pub.publish(message)', approve)
 
     def test_blocking_gazebo_handoffs_are_daemon_workers(self):
-        source = open(os.path.join(
-            PACKAGE, 'scripts', 'ground_pick_node.py')).read()
+        source = self.read('scripts', 'ground_pick_node.py')
         self.assertIn('def start_daemon_worker(', source)
         self.assertIn("name='ground_pick_refine'", source)
         self.assertIn("name='ground_pick_manipulation'", source)
@@ -172,22 +153,11 @@ class ConfigurationTest(unittest.TestCase):
         self.assertIn('self.zero_command_pub.publish(Twist())', safety)
 
     def test_handoff_commands_are_bounded_and_fail_closed(self):
-        source = open(os.path.join(
-            PACKAGE, 'scripts', 'ground_pick_node.py')).read()
+        source = self.read('scripts', 'ground_pick_node.py')
         self.assertIn('self.mobile_handoff_timeout', source)
         self.assertIn("wait_mobile_manipulation_state('ANCHORED_RELEASED'",
                       source)
         self.assertIn("wait_mobile_manipulation_state('ACTIVE_READY'", source)
-
-    def test_trial_monitor_requires_fresh_command_and_physical_stop(self):
-        source = open(os.path.join(
-            PACKAGE, 'scripts', 'ground_pick_trial_monitor.py')).read()
-        self.assertIn('self.latest_cmd = None', source)
-        self.assertIn('self.latest_cmd_wall = None', source)
-        self.assertIn('self.terminal_wall = None', source)
-        self.assertIn('terminal_stop_is_safe(', source)
-        self.assertIn("'stop_command_fresh'", source)
-        self.assertIn("'model_stationary'", source)
 
     def test_manifest_declares_direct_launch_and_python_dependencies(self):
         root = ET.parse(os.path.join(PACKAGE, 'package.xml')).getroot()

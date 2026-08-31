@@ -10,7 +10,6 @@ import yaml
 
 PACKAGE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT = os.path.dirname(PACKAGE)
-WORKSPACE = os.path.dirname(os.path.dirname(PROJECT))
 
 
 class ConfigurationTest(unittest.TestCase):
@@ -144,20 +143,6 @@ class ConfigurationTest(unittest.TestCase):
         self.assertIn('check_rotation_sweep', node)
         self.assertIn('self.gate.block()', node)
 
-    def test_rear_obstacle_probe_covers_blocked_and_clear_costmap_cases(self):
-        launch = self.read('launch/rear_obstacle_safety_probe.launch')
-        self.assertIn('<arg name="obstacle_y"', launch)
-        self.assertIn('<arg name="expect_blocked"', launch)
-        self.assertIn('value="$(arg obstacle_y)"', launch)
-        self.assertIn('value="$(arg expect_blocked)"', launch)
-        probe = self.read('scripts/probe_rear_obstacle_safety.py')
-        self.assertIn('OccupancyGrid', probe)
-        self.assertIn('obstacle_in_costmap', probe)
-        self.assertIn('GoalStatus.SUCCEEDED', probe)
-        self.assertIn("'arrived': arrived", probe)
-        model = self.read('models/rear_gate_obstacle.sdf')
-        self.assertIn('<size>0.20 0.20 1.00</size>', model)
-
     def test_heading_gate_runtime_dependencies_are_declared(self):
         package = ET.parse(os.path.join(PACKAGE, 'package.xml')).getroot()
         exec_dependencies = [item.text
@@ -165,37 +150,6 @@ class ConfigurationTest(unittest.TestCase):
         self.assertIn('std_msgs', exec_dependencies)
         cmake = self.read('CMakeLists.txt')
         self.assertIn('scripts/heading_gate_node.py', cmake)
-
-    def test_matrix_has_multiple_unique_approach_poses(self):
-        with open(os.path.join(PACKAGE, 'config',
-                               'navigation_scenarios.yaml')) as stream:
-            scenarios = yaml.safe_load(stream)['scenarios']
-        self.assertGreaterEqual(len(scenarios), 14)
-        poses = set((item['x'], item['y'], item['yaw']) for item in scenarios)
-        self.assertEqual(len(poses), len(scenarios))
-        self.assertGreaterEqual(sum(bool(item.get('expect_heading_gate'))
-                                    for item in scenarios), 3)
-        self.assertTrue(any(
-            item.get('id') == 'near_rear_reverse_allowed' and
-            not item.get('expect_heading_gate') for item in scenarios))
-
-    def test_trial_launch_has_required_monitor_and_no_manipulation(self):
-        text = self.read('launch/navigation_trial.launch')
-        root = ET.fromstring(text)
-        monitor = root.find(".//node[@type='navigation_trial_monitor.py']")
-        self.assertIsNotNone(monitor)
-        self.assertEqual(monitor.attrib.get('required'), 'true')
-        self.assertNotIn('/brick_pose', text)
-        self.assertNotIn('pick', text.lower())
-        monitor_source = self.read('scripts/navigation_trial_monitor.py')
-        self.assertIn('OccupancyGrid', monitor_source)
-        self.assertIn('wait_for_fresh_costmap', monitor_source)
-
-    def test_matrix_runner_enforces_full_scenario_set(self):
-        text = self.read('scripts/run_navigation_matrix.py')
-        self.assertIn('MINIMUM_TRIALS = 14', text)
-        self.assertNotIn("add_argument('--limit'", text)
-        self.assertIn('container_exit_code', text)
 
     def test_approach_demo_reuses_navigation_without_manipulation(self):
         text = self.read('launch/approach_pose_demo.launch')
@@ -238,44 +192,12 @@ class ConfigurationTest(unittest.TestCase):
         self.assertGreater(config['target_sweep_angular_step'], 0.0)
         self.assertGreaterEqual(config['costmap_settle_duration'], 0.8)
 
-    def test_approach_matrix_has_valid_fallback_and_rejection_cases(self):
-        with open(os.path.join(PACKAGE, 'config',
-                               'approach_scenarios.yaml')) as stream:
-            scenarios = yaml.safe_load(stream)['scenarios']
-        self.assertGreaterEqual(len(scenarios), 10)
-        self.assertGreaterEqual(sum(bool(item['expect_generation'])
-                                    for item in scenarios), 8)
-        self.assertTrue(any(item.get('small_obstacle') for item in scenarios))
-        self.assertTrue(any(not item['expect_generation'] and
-                            abs(float(item['brick_x'])) > 6.0
-                            for item in scenarios))
-        self.assertEqual(len(set(item['id'] for item in scenarios)),
-                         len(scenarios))
-        launch = self.read('launch/approach_pose_trial.launch')
-        self.assertIn('-model approach_obstacle', launch)
-        self.assertIn('-y $(arg obstacle_y) -z 0.50', launch)
-
     def test_approach_runtime_files_are_installed(self):
         cmake = self.read('CMakeLists.txt')
-        for name in ('approach_pose_node.py', 'approach_trial_monitor.py',
-                     'run_approach_matrix.py'):
-            self.assertIn('scripts/' + name, cmake)
+        self.assertIn('scripts/approach_pose_node.py', cmake)
         package = ET.parse(os.path.join(PACKAGE, 'package.xml')).getroot()
         dependencies = [item.text for item in package.findall('exec_depend')]
         self.assertIn('visualization_msgs', dependencies)
-
-    def test_approach_matrix_runner_enforces_complete_fresh_trials(self):
-        text = self.read('scripts/run_approach_matrix.py')
-        self.assertIn('MINIMUM_TRIALS = 10', text)
-        self.assertNotIn("add_argument('--limit'", text)
-        self.assertIn("result_path.unlink()", text)
-        self.assertIn("result['container_exit_code'] = exit_code", text)
-        self.assertIn("all(item.get('success')", text)
-
-    def test_docker_image_installs_melodic_navigation(self):
-        with open(os.path.join(WORKSPACE, 'docker', 'Dockerfile')) as stream:
-            text = stream.read()
-        self.assertIn('ros-melodic-navigation', text)
 
 
 if __name__ == '__main__':

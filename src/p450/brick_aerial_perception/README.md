@@ -1,8 +1,8 @@
 # M1 P450 Aerial Perception Simulation
 
-This package adds the smallest aerial perception loop on top of the existing
-Prometheus P450/PX4 Gazebo stack. It does not replace the flight controller and
-does not depend on BUNKER or the Ground-only workspaces.
+This runtime component adds the smallest aerial perception loop on top of the
+existing Prometheus P450/PX4 Gazebo stack. It does not replace the flight
+controller and does not depend on BUNKER or the Ground-only packages.
 
 ## Runtime chain
 
@@ -13,27 +13,12 @@ intrinsics. Raw depth therefore must not be indexed with a color mask. The M1
 node registers raw `16UC1` depth into the color imager and publishes an aligned
 `32FC1` image before back-projection.
 
-## Build and launch
+## Integration
 
-```bash
-cd /home/lu/navCarProject_ws/p450-sensors
-source /opt/ros/noetic/setup.bash
-source /home/lu/P450/prometheus/Prometheus/devel/setup.bash --extend
-catkin_make --source Modules/brick_aerial_perception \
-  --build build/brick_aerial_perception \
-  -DPYTHON_EXECUTABLE=/usr/bin/python3
-
-./Modules/brick_aerial_perception/scripts/run_m1_demo.bash
-```
-
-The normal demo opens Gazebo and RViz and automatically flies all four views.
-For a headless validation report:
-
-```bash
-./Modules/brick_aerial_perception/scripts/run_m1_demo.bash \
-  gui:=false rviz_enable:=false validation_enable:=true \
-  validation_output:=/tmp/m1_validation.json
-```
+This package is an inherited runtime component, not a top-level simulation
+owner. The Simulation Platform V1.0 launch supplied by `sim_platform_bringup`
+will compose it with the shared world, PX4/MAVROS, sensor, and TF owners. Its
+package-local launch remains useful for focused component diagnosis only.
 
 ## Interfaces
 

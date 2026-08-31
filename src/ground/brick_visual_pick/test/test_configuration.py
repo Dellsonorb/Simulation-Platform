@@ -27,16 +27,6 @@ class ConfigurationTest(unittest.TestCase):
         mover = root.find(".//node[@name='move_to_camera_observation']")
         self.assertIn('sleep 2', mover.attrib.get('launch-prefix', ''))
 
-    def test_scenario_matrix_contains_twenty_distinct_valid_cases_and_control(self):
-        path = os.path.join(PACKAGE, 'config', 'visual_pick_scenarios.yaml')
-        with open(path) as stream:
-            data = yaml.safe_load(stream)
-        valid = data['valid_scenarios']
-        self.assertGreaterEqual(len(valid), 20)
-        poses = set((item['x'], item['y'], item['yaw']) for item in valid)
-        self.assertEqual(len(poses), len(valid))
-        self.assertFalse(data['rejection_control']['expect_pose'])
-
     def test_gate_requires_robot_base_frame(self):
         path = os.path.join(PACKAGE, 'config', 'pose_gate.yaml')
         with open(path) as stream:
@@ -54,16 +44,6 @@ class ConfigurationTest(unittest.TestCase):
         self.assertEqual(planning_arg.attrib['default'], 'world')
         override = root.find("param[@name='brick_pick_node/grasp/planning_frame']")
         self.assertEqual(override.attrib['value'], '$(arg planning_frame)')
-
-    def test_matrix_acceptance_cannot_skip_required_trials_or_control(self):
-        path = os.path.join(os.path.dirname(PROJECT), '..', 'scripts',
-                            'run_visual_pick_matrix.py')
-        with open(os.path.abspath(path)) as stream:
-            text = stream.read()
-        self.assertNotIn("add_argument('--limit'", text)
-        self.assertNotIn("add_argument('--skip-control'", text)
-        self.assertIn('result_path.unlink()', text)
-
 
 if __name__ == '__main__':
     unittest.main()

@@ -7,8 +7,6 @@ catkin_package()
 
 catkin_install_python(PROGRAMS
   scripts/ground_pick_node.py
-  scripts/ground_pick_trial_monitor.py
-  scripts/run_ground_pick_matrix.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
@@ -19,7 +17,6 @@ install(DIRECTORY config launch
 if(CATKIN_ENABLE_TESTING)
   find_package(rostest REQUIRED)
   catkin_add_nosetests(test/test_mission_state.py)
-  catkin_add_nosetests(test/test_mission_metrics.py)
   catkin_add_nosetests(test/test_safety_guards.py)
   catkin_add_nosetests(test/test_configuration.py)
   catkin_add_nosetests(test/test_observation_planning.py)

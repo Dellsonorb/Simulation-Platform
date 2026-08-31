@@ -23,17 +23,11 @@ catkin_package()
 catkin_install_python(PROGRAMS
   scripts/aerial_brick_pose_node.py
   scripts/aerial_viewpoint_mission.py
-  scripts/aerial_viewpoint_mission_multiview.py
-  scripts/m1_validation_monitor.py
   scripts/world_tf_bridge.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
-install(PROGRAMS scripts/run_m1_demo.bash
-  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
-
-install(DIRECTORY config docs launch rviz worlds
+install(DIRECTORY config launch rviz worlds
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 

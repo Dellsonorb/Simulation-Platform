@@ -3,7 +3,7 @@ approach_input_topic: /known_brick_pose
 approach_status_topic: /bunker/approach_status
 refine_output_topic: /ground_pick/refined_brick_pose
 refine_status_topic: /ground_pick/refine_status
-formal_pose_topic: /brick_pose
+legacy_pick_pose_topic: /brick_pose
 approved_pose_topic: /ground_pick/approved_brick_pose
 status_topic: /ground_pick/status
 required_pose_frame: aubo_i5_base_link

@@ -92,8 +92,8 @@ class GroundPickOrchestrator(object):
         self.approach_input_pub = rospy.Publisher(
             rospy.get_param('~approach_input_topic', '/known_brick_pose'),
             PoseStamped, queue_size=1, latch=True)
-        self.formal_pose_pub = rospy.Publisher(
-            rospy.get_param('~formal_pose_topic', '/brick_pose'),
+        self.legacy_pick_pose_pub = rospy.Publisher(
+            rospy.get_param('~legacy_pick_pose_topic', '/brick_pose'),
             PoseStamped, queue_size=1, latch=True)
         self.approved_pose_pub = rospy.Publisher(
             rospy.get_param('~approved_pose_topic',
@@ -603,7 +603,7 @@ class GroundPickOrchestrator(object):
                 return
             # This is the only publication handoff to the frozen V0.2 pick.
             # It occurs after the fixed-base model and controllers are ready.
-            self.formal_pose_pub.publish(message)
+            self.legacy_pick_pose_pub.publish(message)
             self.approved_pose_pub.publish(message)
             self.publish_status(force=True)
 

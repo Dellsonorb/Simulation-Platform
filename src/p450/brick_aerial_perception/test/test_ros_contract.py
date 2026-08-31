@@ -130,16 +130,6 @@ class RosContractTest(unittest.TestCase):
             self.assertIn(token, source)
         self.assertNotIn("set_model_state", source)
 
-    def test_demo_runner_sources_noetic_prometheus_px4_and_local_overlay(self):
-        source = (PACKAGE / "scripts" / "run_m1_demo.bash").read_text()
-        for token in (
-            "/opt/ros/noetic/setup.bash", "M1_PROMETHEUS_ROOT",
-            "M1_WS_ROOT", ".external/px4",
-            "Tools/setup_gazebo.bash", "devel/setup.bash",
-            "m1_aerial_perception.launch", '"$@"',
-        ):
-            self.assertIn(token, source)
-
     def test_launch_reuses_official_p450_and_is_ground_independent(self):
         launch = (PACKAGE / "launch" / "m1_aerial_perception.launch").read_text()
         world = (PACKAGE / "worlds" / "m1_brick.world").read_text()

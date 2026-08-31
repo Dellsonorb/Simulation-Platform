@@ -18,12 +18,7 @@ install(TARGETS bunker_planar_drive_plugin
 
 catkin_install_python(PROGRAMS
   scripts/approach_pose_node.py
-  scripts/approach_trial_monitor.py
   scripts/heading_gate_node.py
-  scripts/navigation_trial_monitor.py
-  scripts/probe_rear_obstacle_safety.py
-  scripts/run_navigation_matrix.py
-  scripts/run_approach_matrix.py
   scripts/send_approach_pose.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
@@ -34,9 +29,7 @@ install(DIRECTORY config launch models rviz worlds
 
 if(CATKIN_ENABLE_TESTING)
   find_package(rostest REQUIRED)
-  catkin_add_nosetests(test/test_metrics.py)
   catkin_add_nosetests(test/test_approach_pose.py)
-  catkin_add_nosetests(test/test_approach_metrics.py)
   catkin_add_nosetests(test/test_configuration.py)
   catkin_add_nosetests(test/test_costmap_sweep.py)
   catkin_add_nosetests(test/test_heading_gate.py)
