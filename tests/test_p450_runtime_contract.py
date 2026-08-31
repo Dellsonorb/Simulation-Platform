@@ -1259,8 +1259,7 @@ class RuntimeWrapperContractTest(unittest.TestCase):
         )
         self.assertEqual(
             [str(local_plugin_root), str(install_plugin_root),
-             str(plugin_root), str(install_plugin_root),
-             "/opt/ros/noetic/lib"],
+             str(plugin_root), "/opt/ros/noetic/lib"],
             environment["LD_LIBRARY_PATH"].split(":"),
         )
         self.assertEqual(
@@ -1335,6 +1334,84 @@ class RuntimeWrapperContractTest(unittest.TestCase):
                 text=True, check=False)
             self.assertNotEqual(0, result.returncode)
             self.assertIn("installed Livox plugin", result.stderr)
+
+    def test_runtime_wrapper_rejects_livox_plugin_shadowing(self):
+        for shadow_kind in ("overlay", "external_symlink", "clean_tail"):
+            with self.subTest(shadow_kind=shadow_kind):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    runtime_root, checkout, _probe = self._make_wrapper_fixture(
+                        root)
+                    plugin_name = "liblivox_laser_gazebo_plugins.so"
+                    if shadow_kind == "overlay":
+                        shadow = (runtime_root / EXPECTED_LOCAL_PLUGIN_ROOT /
+                                  plugin_name)
+                        shutil.copy2("/bin/true", shadow)
+                    elif shadow_kind == "external_symlink":
+                        escaped = root / "escaped livox shadow"
+                        shutil.copy2("/bin/true", escaped)
+                        shadow = (checkout.root /
+                                  "build/amovlab_sitl_default/build_gazebo" /
+                                  plugin_name)
+                        shadow.symlink_to(escaped)
+                    else:
+                        clean_tail = root / "clean plugin tail"
+                        clean_tail.mkdir()
+                        shutil.copy2("/bin/true", clean_tail / plugin_name)
+                        setup = (runtime_root /
+                                 "install/p450-clean/setup.bash")
+                        setup.write_text(
+                            setup.read_text(encoding="utf-8").replace(
+                                "/opt/ros/noetic/lib",
+                                "%s:/opt/ros/noetic/lib" % clean_tail,
+                            ),
+                            encoding="utf-8",
+                        )
+
+                    result = subprocess.run(
+                        [str(runtime_root / "scripts/with_p450_env.bash"),
+                         "/usr/bin/true"],
+                        env={
+                            "PATH": "/usr/bin:/bin",
+                            "P450_PX4_ROOT": str(checkout.root),
+                        },
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        check=False,
+                    )
+                self.assertEqual(65, result.returncode, result.stderr)
+                self.assertIn("Livox plugin shadow", result.stderr)
+
+    def test_runtime_wrapper_rejects_invalid_clean_plugin_path_items(self):
+        for invalid_path in ("relative/plugins", ":/opt/ros/noetic/lib"):
+            with self.subTest(invalid_path=invalid_path):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    runtime_root, checkout, _probe = self._make_wrapper_fixture(
+                        root)
+                    setup = runtime_root / "install/p450-clean/setup.bash"
+                    setup.write_text(
+                        setup.read_text(encoding="utf-8").replace(
+                            "export GAZEBO_PLUGIN_PATH='/opt/ros/noetic/lib'",
+                            "export GAZEBO_PLUGIN_PATH='%s'" % invalid_path,
+                        ),
+                        encoding="utf-8",
+                    )
+                    result = subprocess.run(
+                        [str(runtime_root / "scripts/with_p450_env.bash"),
+                         "/usr/bin/true"],
+                        env={
+                            "PATH": "/usr/bin:/bin",
+                            "P450_PX4_ROOT": str(checkout.root),
+                        },
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        check=False,
+                    )
+                self.assertEqual(65, result.returncode, result.stderr)
+                self.assertIn("absolute non-empty directories", result.stderr)
 
     def test_runtime_wrapper_maps_explicit_render_capability(self):
         with tempfile.TemporaryDirectory() as temporary:

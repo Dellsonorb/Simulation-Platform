@@ -21,3 +21,9 @@ composite:
 topic:
   name: /uav1/livox/lidar
   type: prometheus_msgs/LivoxCustomMsg
+
+# uav_control_main loads the offsets with nh.param<float>; live TF checks must
+# therefore allow bounded float32 representation error around this contract.
+runtime_tolerance:
+  translation_m: 1.0e-6
+  rotation_xyzw: 1.0e-6

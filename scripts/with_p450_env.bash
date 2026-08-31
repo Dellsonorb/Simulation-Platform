@@ -136,6 +136,132 @@ exec "$p450_noetic_wrapper" \
     p450_clean_gazebo_plugin_path="${GAZEBO_PLUGIN_PATH:-}"
     p450_clean_ld_library_path="${LD_LIBRARY_PATH:-}"
 
+    p450_append_unique_directory() {
+      local p450_array_name="$1"
+      local p450_candidate="$2"
+      local p450_label="$3"
+      local p450_candidate_canonical=""
+      local p450_existing=""
+      local p450_existing_canonical=""
+      local -n p450_entries="$p450_array_name"
+
+      if [[ -z "$p450_candidate" || "$p450_candidate" != /* ]]; then
+        echo "$p450_label must contain absolute non-empty directories" >&2
+        return 65
+      fi
+      if ! p450_candidate_canonical="$(
+        /usr/bin/realpath -e -- "$p450_candidate"
+      )" || [[ ! -d "$p450_candidate" || ! -r "$p450_candidate" ]]; then
+        echo "$p450_label directory is missing or unreadable: $p450_candidate" >&2
+        return 66
+      fi
+      for p450_existing in "${p450_entries[@]}"; do
+        if ! p450_existing_canonical="$(
+          /usr/bin/realpath -e -- "$p450_existing"
+        )"; then
+          echo "$p450_label directory became unavailable: $p450_existing" >&2
+          return 66
+        fi
+        if [[ "$p450_existing_canonical" == "$p450_candidate_canonical" ]]; then
+          return 0
+        fi
+      done
+      p450_entries+=("$p450_candidate")
+    }
+
+    p450_append_directory_list() {
+      local p450_array_name="$1"
+      local p450_path_list="$2"
+      local p450_label="$3"
+      local p450_entry=""
+      local -a p450_list_entries=()
+
+      if [[ -z "$p450_path_list" ]]; then
+        return 0
+      fi
+      if [[ "$p450_path_list" == :* || "$p450_path_list" == *: || \
+          "$p450_path_list" == *::* ]]; then
+        echo "$p450_label must contain absolute non-empty directories" >&2
+        return 65
+      fi
+      IFS=: read -r -a p450_list_entries <<< "$p450_path_list"
+      for p450_entry in "${p450_list_entries[@]}"; do
+        p450_append_unique_directory \
+          "$p450_array_name" "$p450_entry" "$p450_label"
+      done
+    }
+
+    p450_join_directories() {
+      local p450_array_name="$1"
+      local -n p450_entries="$p450_array_name"
+      local IFS=:
+      printf "%s" "${p450_entries[*]}"
+    }
+
+    p450_require_unshadowed_livox() {
+      local p450_path_list="$1"
+      local p450_label="$2"
+      local p450_entry=""
+      local p450_candidate=""
+      local p450_candidate_canonical=""
+      local p450_livox_hits=0
+      local -a p450_entries=()
+
+      IFS=: read -r -a p450_entries <<< "$p450_path_list"
+      for p450_entry in "${p450_entries[@]}"; do
+        p450_candidate="$p450_entry/liblivox_laser_gazebo_plugins.so"
+        if [[ ! -e "$p450_candidate" && ! -L "$p450_candidate" ]]; then
+          continue
+        fi
+        if ! p450_candidate_canonical="$(
+          /usr/bin/realpath -e -- "$p450_candidate"
+        )" || [[ ! -f "$p450_candidate" || ! -r "$p450_candidate" ]]; then
+          echo "$p450_label has an invalid Livox plugin candidate: $p450_candidate" >&2
+          return 66
+        fi
+        if [[ "$p450_candidate" != "$p450_livox_plugin" || \
+            "$p450_candidate_canonical" != "$p450_livox_plugin_canonical" ]]; then
+          echo "$p450_label has a Livox plugin shadow: $p450_candidate" >&2
+          return 65
+        fi
+        p450_livox_hits=$((p450_livox_hits + 1))
+      done
+      if [[ "$p450_livox_hits" -lt 1 ]]; then
+        echo "$p450_label does not contain the installed Livox plugin" >&2
+        return 66
+      fi
+    }
+
+    p450_livox_plugin="$p450_install_plugins/liblivox_laser_gazebo_plugins.so"
+    p450_livox_plugin_canonical="$(
+      /usr/bin/realpath -e -- "$p450_livox_plugin"
+    )"
+    p450_gazebo_plugin_entries=()
+    p450_ld_library_entries=()
+    for p450_plugin_root in \
+        "$p450_local_plugins" "$p450_install_plugins" \
+        "$p450_external_plugins"; do
+      p450_append_unique_directory \
+        p450_gazebo_plugin_entries "$p450_plugin_root" GAZEBO_PLUGIN_PATH
+      p450_append_unique_directory \
+        p450_ld_library_entries "$p450_plugin_root" LD_LIBRARY_PATH
+    done
+    p450_append_directory_list \
+      p450_gazebo_plugin_entries "$p450_clean_gazebo_plugin_path" \
+      GAZEBO_PLUGIN_PATH
+    p450_append_directory_list \
+      p450_ld_library_entries "$p450_clean_ld_library_path" LD_LIBRARY_PATH
+    p450_final_gazebo_plugin_path="$(
+      p450_join_directories p450_gazebo_plugin_entries
+    )"
+    p450_final_ld_library_path="$(
+      p450_join_directories p450_ld_library_entries
+    )"
+    p450_require_unshadowed_livox \
+      "$p450_final_gazebo_plugin_path" GAZEBO_PLUGIN_PATH
+    p450_require_unshadowed_livox \
+      "$p450_final_ld_library_path" LD_LIBRARY_PATH
+
     export P450_PX4_ROOT="$p450_px4_root"
     if [[ -n "$p450_gazebo_display" ]]; then
       export DISPLAY="$p450_gazebo_display"
@@ -143,8 +269,8 @@ exec "$p450_noetic_wrapper" \
     fi
     export ROS_PACKAGE_PATH="$p450_px4_root:$p450_px4_root/Tools/sitl_gazebo${ROS_PACKAGE_PATH:+:$ROS_PACKAGE_PATH}"
     export GAZEBO_MODEL_PATH="$p450_assets_models:$p450_prometheus_share/gazebo_models/uav_models:$p450_prometheus_share/gazebo_models/sensor_models:$p450_prometheus_share/gazebo_models/scene_models:$p450_prometheus_share/gazebo_models/r200_models:$p450_prometheus_share/gazebo_models/texture:$p450_external_models"
-    export GAZEBO_PLUGIN_PATH="$p450_local_plugins:$p450_install_plugins:$p450_external_plugins${p450_clean_gazebo_plugin_path:+:$p450_clean_gazebo_plugin_path}"
-    export LD_LIBRARY_PATH="$p450_local_plugins:$p450_install_plugins:$p450_external_plugins${p450_clean_ld_library_path:+:$p450_clean_ld_library_path}"
+    export GAZEBO_PLUGIN_PATH="$p450_final_gazebo_plugin_path"
+    export LD_LIBRARY_PATH="$p450_final_ld_library_path"
 
     p450_require_package_path() {
       local p450_package="$1"

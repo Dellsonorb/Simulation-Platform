@@ -28,6 +28,10 @@ SENSOR_TF_OFFSETS = (
     REPOSITORY_ROOT
     / "src/p450/prometheus_uav_control/launch/sensor_tf_offset.yaml"
 )
+UAV_ESTIMATOR = (
+    REPOSITORY_ROOT
+    / "src/p450/prometheus_uav_control/src/uav_estimator.cpp"
+)
 
 JINJA_MODEL = (
     REPOSITORY_ROOT
@@ -498,7 +502,7 @@ class Mid360TfContractTest(unittest.TestCase):
     def test_contract_freezes_model_composite_authority_and_message(self):
         self.assertEqual({
             "schema_version", "profile", "frame_normalization", "model",
-            "composite", "topic",
+            "composite", "topic", "runtime_tolerance",
         }, set(self.contract))
         self.assertEqual(1, self.contract["schema_version"])
         self.assertEqual("p450_D435i_mid360", self.contract["profile"])
@@ -535,6 +539,20 @@ class Mid360TfContractTest(unittest.TestCase):
             "name": "/uav1/livox/lidar",
             "type": "prometheus_msgs/LivoxCustomMsg",
         }, self.contract["topic"])
+        self.assertEqual({
+            "translation_m": 1.0e-6,
+            "rotation_xyzw": 1.0e-6,
+        }, self.contract["runtime_tolerance"])
+
+        # The controller loads these values as float32, so future live checks
+        # must compare the published transform with the recorded tolerance.
+        estimator = _read(UAV_ESTIMATOR)
+        for suffix in (
+                "x", "y", "z", "roll", "pitch", "yaw"):
+            self.assertIn(
+                'nh.param<float>("Lidar/offset_%s"' % suffix,
+                estimator,
+            )
 
     def test_composite_is_derived_from_mount_and_ray_sensor(self):
         model = self.contract["model"]
