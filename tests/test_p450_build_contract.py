@@ -1,5 +1,4 @@
 import re
-import shlex
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -71,14 +70,106 @@ REQUIRED_CATKIN_COMPONENTS = {
     }),
 }
 
-REQUIRED_MANIFEST_DEPENDENCIES = {
-    "prometheus_uav_control": REQUIRED_CATKIN_COMPONENTS[
-        "prometheus_uav_control"
-    ] | frozenset({"eigen", "geographiclib", "mavlink"}),
-    "realsense_ros_gazebo": REQUIRED_CATKIN_COMPONENTS[
-        "realsense_ros_gazebo"
-    ] | frozenset({"boost"}),
+REQUIRED_MANIFEST_PHASES = {
+    "prometheus_uav_control": {
+        "build": REQUIRED_CATKIN_COMPONENTS["prometheus_uav_control"] |
+                 frozenset({
+                     "eigen", "geographiclib", "mavlink", "pkg-config",
+                 }),
+        "export": frozenset({
+            "eigen",
+            "geographiclib",
+            "geometry_msgs",
+            "mavlink",
+            "mavros",
+            "mavros_msgs",
+            "nav_msgs",
+            "prometheus_msgs",
+            "roscpp",
+            "sensor_msgs",
+            "std_msgs",
+            "tf2_geometry_msgs",
+            "tf2_ros",
+            "visualization_msgs",
+        }),
+        "exec": frozenset({
+            "diagnostic_updater",
+            "geographiclib",
+            "geometry_msgs",
+            "mavros",
+            "mavros_msgs",
+            "nav_msgs",
+            "prometheus_msgs",
+            "roscpp",
+            "sensor_msgs",
+            "std_msgs",
+            "tf2_geometry_msgs",
+            "tf2_ros",
+            "visualization_msgs",
+        }),
+    },
+    "realsense_ros_gazebo": {
+        "build": REQUIRED_CATKIN_COMPONENTS["realsense_ros_gazebo"] |
+                 frozenset({"boost"}),
+        "export": frozenset({
+            "boost",
+            "camera_info_manager",
+            "gazebo_dev",
+            "image_transport",
+            "roscpp",
+            "sensor_msgs",
+        }),
+        "exec": frozenset({
+            "camera_info_manager",
+            "gazebo",
+            "gazebo_ros",
+            "image_transport",
+            "roscpp",
+            "sensor_msgs",
+        }),
+    },
 }
+
+REQUIRED_CATKIN_EXPORTS = {
+    "prometheus_msgs": frozenset({
+        "actionlib_msgs",
+        "geometry_msgs",
+        "message_runtime",
+        "sensor_msgs",
+        "std_msgs",
+    }),
+    "prometheus_uav_control": frozenset({
+        "geometry_msgs",
+        "mavros",
+        "mavros_msgs",
+        "nav_msgs",
+        "prometheus_msgs",
+        "roscpp",
+        "sensor_msgs",
+        "std_msgs",
+        "tf2_geometry_msgs",
+        "tf2_ros",
+        "visualization_msgs",
+    }),
+    "realsense_ros_gazebo": frozenset({
+        "camera_info_manager",
+        "gazebo_dev",
+        "image_transport",
+        "roscpp",
+        "sensor_msgs",
+    }),
+}
+
+REQUIRED_GAZEBO_RUNTIME_DEPENDENCIES = frozenset({
+    "gazebo_plugins",
+    "gazebo_ros",
+    "mavros",
+    "python3-jinja2",
+    "python3-numpy",
+    "realsense_ros_gazebo",
+    "rviz",
+    "tf",
+})
 
 EXPECTED_MSG_MANIFEST_PHASES = {
     "build": EXPECTED_MSG_COMPONENTS,
@@ -143,24 +234,96 @@ def _cmake_path(package):
     return P450 / package / "CMakeLists.txt"
 
 
+def _bracket_argument(text, index):
+    match = re.match(r"\[(=*)\[", text[index:])
+    if match is None:
+        return None
+    closing = "]%s]" % match.group(1)
+    content_start = index + match.end()
+    closing_start = text.find(closing, content_start)
+    if closing_start < 0:
+        raise AssertionError("unterminated CMake bracket argument")
+    return content_start, closing_start, closing_start + len(closing)
+
+
 def _strip_cmake_comments(text):
-    lines = []
-    for line in text.splitlines():
-        quote = None
-        kept = []
-        for character in line:
-            if character in ("'", '"'):
-                quote = None if quote == character else character
-            if character == "#" and quote is None:
+    result = []
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if character == '"':
+            start = index
+            index += 1
+            while index < len(text):
+                if text[index] == "\\":
+                    index += 2
+                    continue
+                if text[index] == '"':
+                    index += 1
+                    break
+                index += 1
+            result.append(text[start:index])
+            continue
+        bracket = _bracket_argument(text, index) if character == "[" else None
+        if bracket is not None:
+            result.append(text[index:bracket[2]])
+            index = bracket[2]
+            continue
+        if character == "#":
+            comment_bracket = _bracket_argument(text, index + 1)
+            if comment_bracket is not None:
+                index = comment_bracket[2]
+                continue
+            newline = text.find("\n", index)
+            if newline < 0:
                 break
-            kept.append(character)
-        lines.append("".join(kept))
-    return "\n".join(lines)
+            result.append("\n")
+            index = newline + 1
+            continue
+        result.append(character)
+        index += 1
+    return "".join(result)
 
 
-def _cmake_commands(package):
-    """Return (lowercase command, shell-like tokens) for simple CMake files."""
-    text = _strip_cmake_comments(_cmake_path(package).read_text(encoding="utf-8"))
+def _cmake_tokens(text):
+    tokens = []
+    index = 0
+    while index < len(text):
+        while index < len(text) and (text[index].isspace() or text[index] == ";"):
+            index += 1
+        if index >= len(text):
+            break
+        if text[index] == '"':
+            index += 1
+            value = []
+            while index < len(text):
+                if text[index] == "\\" and index + 1 < len(text):
+                    value.append(text[index + 1])
+                    index += 2
+                    continue
+                if text[index] == '"':
+                    index += 1
+                    break
+                value.append(text[index])
+                index += 1
+            tokens.append("".join(value))
+            continue
+        bracket = _bracket_argument(text, index) if text[index] == "[" else None
+        if bracket is not None:
+            tokens.append(text[bracket[0]:bracket[1]])
+            index = bracket[2]
+            continue
+        start = index
+        while (index < len(text) and not text[index].isspace() and
+               text[index] != ";"):
+            index += 1
+        tokens.append(text[start:index])
+    return tuple(tokens)
+
+
+def _cmake_commands_from_text(raw_text):
+    """Parse the command subset used by the frozen P450 CMake files."""
+    text = _strip_cmake_comments(raw_text)
     start = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
     commands = []
     cursor = 0
@@ -169,25 +332,47 @@ def _cmake_commands(package):
         if match is None:
             return tuple(commands)
         depth = 1
-        quote = None
         index = match.end()
         body_start = index
         while index < len(text) and depth:
             character = text[index]
-            if character in ("'", '"'):
-                quote = None if quote == character else character
-            elif quote is None and character == "(":
+            if character == '"':
+                index += 1
+                while index < len(text):
+                    if text[index] == "\\":
+                        index += 2
+                        continue
+                    if text[index] == '"':
+                        index += 1
+                        break
+                    index += 1
+                continue
+            bracket = (_bracket_argument(text, index)
+                       if character == "[" else None)
+            if bracket is not None:
+                index = bracket[2]
+                continue
+            if character == "\\" and index + 1 < len(text):
+                index += 2
+                continue
+            if character == "(":
                 depth += 1
-            elif quote is None and character == ")":
+            elif character == ")":
                 depth -= 1
             index += 1
         if depth:
-            raise AssertionError("unterminated CMake command in %s" % package)
+            raise AssertionError("unterminated CMake command")
         commands.append((
             match.group(1).lower(),
-            tuple(shlex.split(text[body_start:index - 1])),
+            _cmake_tokens(text[body_start:index - 1]),
         ))
         cursor = index
+
+
+def _cmake_commands(package):
+    return _cmake_commands_from_text(
+        _cmake_path(package).read_text(encoding="utf-8")
+    )
 
 
 def _commands(package, name):
@@ -263,26 +448,43 @@ def _catkin_installed_programs(package):
     return frozenset(result)
 
 
-def _installed_targets(package):
+def _installed_targets_from_commands(commands):
     result = []
-    stop = {"ARCHIVE", "DESTINATION", "INCLUDES", "LIBRARY", "RUNTIME"}
-    for tokens in _commands(package, "install"):
+    stop = {
+        "ARCHIVE", "BUNDLE", "COMPONENT", "CONFIGURATIONS", "DESTINATION",
+        "EXCLUDE_FROM_ALL", "EXPORT", "INCLUDES", "LIBRARY",
+        "NAMELINK_COMPONENT", "NAMELINK_ONLY", "NAMELINK_SKIP",
+        "PRIVATE_HEADER", "PUBLIC_HEADER", "RESOURCE", "RUNTIME",
+    }
+    for command, tokens in commands:
+        if command != "install":
+            continue
         if not tokens or tokens[0] != "TARGETS":
             continue
         for token in tokens[1:]:
             if token in stop:
                 break
-            result.append(token.replace("${PROJECT_NAME}", package))
+            result.append(token)
     return frozenset(result)
 
 
-def _catkin_exported_libraries(package):
+def _installed_targets(package):
+    return frozenset(
+        token.replace("${PROJECT_NAME}", package)
+        for token in _installed_targets_from_commands(_cmake_commands(package))
+    )
+
+
+def _catkin_package_field(package, field):
     commands = _commands(package, "catkin_package")
-    if len(commands) != 1 or "LIBRARIES" not in commands[0]:
+    if len(commands) != 1 or field not in commands[0]:
         return frozenset()
     tokens = commands[0]
-    start = tokens.index("LIBRARIES") + 1
-    stop = {"CATKIN_DEPENDS", "CFG_EXTRAS", "DEPENDS", "INCLUDE_DIRS"}
+    start = tokens.index(field) + 1
+    stop = {
+        "CATKIN_DEPENDS", "CFG_EXTRAS", "DEPENDS", "EXPORTED_TARGETS",
+        "INCLUDE_DIRS", "LIBRARIES",
+    }
     result = []
     for token in tokens[start:]:
         if token in stop:
@@ -291,8 +493,41 @@ def _catkin_exported_libraries(package):
     return frozenset(result)
 
 
+def _catkin_exported_libraries(package):
+    return _catkin_package_field(package, "LIBRARIES")
+
+
+class CMakeContractParserTest(unittest.TestCase):
+    def test_comments_quotes_brackets_and_install_export_are_structural(self):
+        commands = _cmake_commands_from_text(r'''
+            # fake_command(ignored)
+            #[=[ another_fake(ignored) ]=]
+            set(TEXT "value # ( \"quoted\" )")
+            set(BRACKET [=[fake_inside(command) # )]=])
+            install(TARGETS real_target EXPORT export_set
+                    RUNTIME DESTINATION bin)
+        ''')
+        self.assertEqual(
+            ("set", "set", "install"),
+            tuple(command for command, _tokens in commands),
+        )
+        self.assertEqual(
+            ("TEXT", 'value # ( "quoted" )'),
+            commands[0][1],
+        )
+        self.assertEqual(
+            ("BRACKET", "fake_inside(command) # )"),
+            commands[1][1],
+        )
+        self.assertEqual(
+            frozenset({"real_target"}),
+            _installed_targets_from_commands(commands),
+        )
+
+
 class P450BuildContractTest(unittest.TestCase):
     def test_uav_control_uses_only_its_frozen_vendor_helpers(self):
+        package = "prometheus_uav_control"
         vendor = P450 / "prometheus_uav_control/vendor_upstream"
         actual = frozenset(
             path.relative_to(vendor).as_posix()
@@ -300,15 +535,33 @@ class P450BuildContractTest(unittest.TestCase):
         )
         self.assertEqual(EXPECTED_VENDOR_FILES, actual)
 
-        text = _cmake_path("prometheus_uav_control").read_text(encoding="utf-8")
-        self.assertNotIn("../common", text)
-        self.assertNotIn("../communication", text)
-        for required in (
+        include_tokens = frozenset(
+            token
+            for tokens in _commands(package, "include_directories")
+            for token in tokens
+        )
+        required_includes = frozenset({
             "vendor_upstream/common/include",
             "vendor_upstream/communication/include",
+        })
+        self.assertFalse(
+            required_includes - include_tokens,
+            "src/p450/prometheus_uav_control/CMakeLists.txt: frozen vendor "
+            "include paths are not declared structurally",
+        )
+        self.assertFalse(
+            {
+                token for token in include_tokens
+                if token.startswith("../common") or
+                token.startswith("../communication")
+            },
+            "src/p450/prometheus_uav_control/CMakeLists.txt: parent-relative "
+            "vendor include path escapes the package",
+        )
+        self.assertIn(
             "vendor_upstream/communication/src/param_manager.cpp",
-        ):
-            self.assertIn(required, text)
+            _targets(package)["uav_controller"],
+        )
 
     def test_compiled_targets_and_sources_are_exact_and_present(self):
         for package, expected in EXPECTED_TARGETS.items():
@@ -322,19 +575,22 @@ class P450BuildContractTest(unittest.TestCase):
 
     def test_asset_and_control_packages_have_no_phantom_messages(self):
         for package in ("prometheus_gazebo", "prometheus_uav_control"):
-            text = _cmake_path(package).read_text(encoding="utf-8")
             dependencies = _all_manifest_dependencies(package)
+            components = _catkin_components(package)
+            command_names = {
+                command for command, _tokens in _cmake_commands(package)
+            }
+            target_dependencies = frozenset(
+                token
+                for tokens in _commands(package, "add_dependencies")
+                for token in tokens[1:]
+            )
             for stale in ("message_generation", "message_runtime"):
                 with self.subTest(package=package, stale=stale):
-                    self.assertNotIn(stale, text)
+                    self.assertNotIn(stale, components)
                     self.assertNotIn(stale, dependencies)
-            self.assertNotIn("generate_messages", {
-                command for command, _tokens in _cmake_commands(package)
-            })
-        self.assertNotIn(
-            "prometheus_gazebo_gencpp",
-            _cmake_path("prometheus_gazebo").read_text(encoding="utf-8"),
-        )
+            self.assertNotIn("generate_messages", command_names)
+            self.assertNotIn("%s_gencpp" % package, target_dependencies)
         self.assertNotIn(
             "prometheus_msgs",
             _catkin_components("prometheus_gazebo"),
@@ -378,7 +634,7 @@ class P450BuildContractTest(unittest.TestCase):
                 )
             manifest = _manifest_dependencies(package)
             for phase in ("build", "export", "exec"):
-                required_phase = REQUIRED_MANIFEST_DEPENDENCIES[package]
+                required_phase = REQUIRED_MANIFEST_PHASES[package][phase]
                 missing = required_phase - manifest[phase]
                 with self.subTest(package=package, phase=phase):
                     self.assertFalse(
@@ -394,6 +650,35 @@ class P450BuildContractTest(unittest.TestCase):
             "src/p450/prometheus_uav_control/package.xml: missing build edge "
             "to prometheus_msgs",
         )
+
+    def test_catkin_package_exports_match_public_build_surface(self):
+        for package, required in REQUIRED_CATKIN_EXPORTS.items():
+            actual = _catkin_package_field(package, "CATKIN_DEPENDS")
+            missing = required - actual
+            with self.subTest(package=package):
+                self.assertFalse(
+                    missing,
+                    "src/p450/%s/CMakeLists.txt: catkin_package is missing "
+                    "public CATKIN_DEPENDS %s" % (package, sorted(missing)),
+                )
+
+    def test_gazebo_assets_declare_runtime_consumers(self):
+        runtime = _manifest_dependencies("prometheus_gazebo")["exec"]
+        missing = REQUIRED_GAZEBO_RUNTIME_DEPENDENCIES - runtime
+        self.assertFalse(
+            missing,
+            "src/p450/prometheus_gazebo/package.xml: missing runtime "
+            "dependencies %s" % sorted(missing),
+        )
+
+    def test_uav_control_requires_cxx17(self):
+        settings = {
+            tokens[0]: tuple(tokens[1:])
+            for tokens in _commands("prometheus_uav_control", "set")
+            if tokens
+        }
+        self.assertEqual(("17",), settings.get("CMAKE_CXX_STANDARD"))
+        self.assertEqual(("ON",), settings.get("CMAKE_CXX_STANDARD_REQUIRED"))
 
     def test_aerial_perception_declares_d435_runtime(self):
         runtime = _manifest_dependencies("brick_aerial_perception")["exec"]
