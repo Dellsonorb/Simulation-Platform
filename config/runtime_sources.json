@@ -1,0 +1,229 @@
+{
+  "schema_version": 1,
+  "upstream": {
+    "expected_commit": "6809c15e3919d1aa3acb6518ad61c49e4150435f"
+  },
+  "layout": {
+    "required_paths": [
+      "dependencies",
+      "src/p450",
+      "src/ground",
+      "src/vendor",
+      "src/platform",
+      "src/demos",
+      "config",
+      "tools",
+      "tests",
+      "docs"
+    ]
+  },
+  "packages": {
+    "prometheus_msgs": {
+      "role": "p450",
+      "source": "Modules/common/prometheus_msgs",
+      "destination": "src/p450/prometheus_msgs",
+      "imported": true
+    },
+    "prometheus_gazebo": {
+      "role": "p450",
+      "source": "Simulator/gazebo_simulator",
+      "destination": "src/p450/prometheus_gazebo",
+      "imported": true
+    },
+    "prometheus_uav_control": {
+      "role": "p450",
+      "source": "Modules/uav_control",
+      "destination": "src/p450/prometheus_uav_control",
+      "imported": true
+    },
+    "realsense_ros_gazebo": {
+      "role": "p450",
+      "source": "Simulator/realsense_gazebo_plugin",
+      "destination": "src/p450/realsense_ros_gazebo",
+      "imported": true
+    },
+    "livox_laser_gazebo_plugins": {
+      "role": "p450",
+      "source": "Simulator/livox_laser_gazebo_plugins",
+      "destination": "src/p450/livox_laser_gazebo_plugins",
+      "imported": true
+    },
+    "brick_aerial_perception": {
+      "role": "p450",
+      "source": "Modules/brick_aerial_perception",
+      "destination": "src/p450/brick_aerial_perception",
+      "imported": true
+    },
+    "bunker_aubo_description": {
+      "role": "ground",
+      "source": "Ground/src/bunker_aubo_project/bunker_aubo_description",
+      "destination": "src/ground/bunker_aubo_description",
+      "imported": true
+    },
+    "bunker_aubo_gazebo": {
+      "role": "ground",
+      "source": "Ground/src/bunker_aubo_project/bunker_aubo_gazebo",
+      "destination": "src/ground/bunker_aubo_gazebo",
+      "imported": true
+    },
+    "bunker_aubo_moveit_config": {
+      "role": "ground",
+      "source": "Ground/src/bunker_aubo_project/bunker_aubo_moveit_config",
+      "destination": "src/ground/bunker_aubo_moveit_config",
+      "imported": true
+    },
+    "bunker_navigation": {
+      "role": "ground",
+      "source": "Ground/src/bunker_aubo_project/bunker_navigation",
+      "destination": "src/ground/bunker_navigation",
+      "imported": true
+    },
+    "brick_rgbd_perception": {
+      "role": "ground",
+      "source": "Ground/src/bunker_aubo_project/brick_rgbd_perception",
+      "destination": "src/ground/brick_rgbd_perception",
+      "imported": true
+    },
+    "brick_visual_pick": {
+      "role": "ground",
+      "source": "Ground/src/bunker_aubo_project/brick_visual_pick",
+      "destination": "src/ground/brick_visual_pick",
+      "imported": true
+    },
+    "brick_pick_demo": {
+      "role": "ground",
+      "source": "Ground/src/bunker_aubo_project/brick_pick_demo",
+      "destination": "src/ground/brick_pick_demo",
+      "imported": true
+    },
+    "ground_pick_orchestrator": {
+      "role": "ground",
+      "source": "Ground/src/bunker_aubo_project/ground_pick_orchestrator",
+      "destination": "src/ground/ground_pick_orchestrator",
+      "imported": true
+    },
+    "aubo_description": {
+      "role": "vendor",
+      "source": "Ground/src/third_party/aubo_robot_melodic/aubo_description",
+      "destination": "src/vendor/aubo_description",
+      "imported": true
+    },
+    "bunker_description": {
+      "role": "vendor",
+      "source": "Ground/src/third_party/ugv_gazebo_sim/bunker/bunker_description",
+      "destination": "src/vendor/bunker_description",
+      "imported": true
+    },
+    "dh_ag95_description": {
+      "role": "vendor",
+      "source": "Ground/src/third_party/scout_cobot_sim/dh_ag95_description",
+      "destination": "src/vendor/dh_ag95_description",
+      "imported": true
+    },
+    "roboticsgroup_gazebo_plugins": {
+      "role": "vendor",
+      "source": "Ground/src/third_party/roboticsgroup_gazebo_plugins",
+      "destination": "src/vendor/roboticsgroup_gazebo_plugins",
+      "imported": true
+    },
+    "sim_platform_bringup": {
+      "role": "platform",
+      "source": null,
+      "destination": "src/platform/sim_platform_bringup",
+      "imported": false
+    },
+    "ground_runtime_compat": {
+      "role": "platform",
+      "source": null,
+      "destination": "src/platform/ground_runtime_compat",
+      "imported": false
+    },
+    "air_ground_pose_bridge": {
+      "role": "platform",
+      "source": null,
+      "destination": "src/platform/air_ground_pose_bridge",
+      "imported": false
+    },
+    "air_ground_pick_demo": {
+      "role": "demo",
+      "source": null,
+      "destination": "src/demos/air_ground_pick_demo",
+      "imported": false
+    }
+  },
+  "auxiliary_imports": [
+    {
+      "name": "geometry_utils",
+      "source": "Modules/common/include/geometry_utils.h",
+      "destination": "src/p450/prometheus_uav_control/vendor_upstream/common/include/geometry_utils.h"
+    },
+    {
+      "name": "math_utils",
+      "source": "Modules/common/include/math_utils.h",
+      "destination": "src/p450/prometheus_uav_control/vendor_upstream/common/include/math_utils.h"
+    },
+    {
+      "name": "printf_utils",
+      "source": "Modules/common/include/printf_utils.h",
+      "destination": "src/p450/prometheus_uav_control/vendor_upstream/common/include/printf_utils.h"
+    },
+    {
+      "name": "param_manager_header",
+      "source": "Modules/communication/include/param_manager.hpp",
+      "destination": "src/p450/prometheus_uav_control/vendor_upstream/communication/include/param_manager.hpp"
+    },
+    {
+      "name": "message_convert_header",
+      "source": "Modules/communication/include/message_convert.hpp",
+      "destination": "src/p450/prometheus_uav_control/vendor_upstream/communication/include/message_convert.hpp"
+    },
+    {
+      "name": "param_manager_source",
+      "source": "Modules/communication/src/param_manager.cpp",
+      "destination": "src/p450/prometheus_uav_control/vendor_upstream/communication/src/param_manager.cpp"
+    },
+    {
+      "name": "upstream_license",
+      "source": "LICENSE",
+      "destination": "docs/upstream/P450-SIM-LICENSE"
+    },
+    {
+      "name": "third_party_licenses",
+      "source": "THIRD_PARTY_LICENSES.md",
+      "destination": "docs/upstream/THIRD_PARTY_LICENSES.md"
+    },
+    {
+      "name": "ground_upstreams",
+      "source": "Ground/upstream.repos",
+      "destination": "docs/upstream/Ground-upstream.repos"
+    },
+    {
+      "name": "source_provenance",
+      "source": "docs/SOURCE_PROVENANCE.md",
+      "destination": "docs/upstream/SOURCE_PROVENANCE.md"
+    },
+    {
+      "name": "historical_source_lock",
+      "source": "manifests/source-lock.json",
+      "destination": "docs/upstream/historical-source-lock.json"
+    }
+  ],
+  "forbidden": {
+    "package_names": [
+      "paper_benchmark",
+      "ground_aerial_benchmark",
+      "system_baseline_freeze",
+      "task_aware_approach",
+      "aerial_traversability",
+      "irm_base_placement",
+      "aerial_ground_bridge"
+    ],
+    "runtime_tokens": [
+      "/m5/",
+      "m5_",
+      "rbp_",
+      "task_aware",
+      "task-aware"
+    ]
+  }
+}
