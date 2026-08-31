@@ -19,10 +19,6 @@ install(
   config
   gazebo_models
   gazebo_worlds
-  launch_basic
-  launch_fmt
-  launch_test
-  launch_uav_with_sensor
   scripts
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )

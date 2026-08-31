@@ -2,7 +2,7 @@
 <package format="2">
   <name>prometheus_gazebo</name>
   <version>0.0.0</version>
-  <description>P450 Gazebo models, worlds, configuration, and launch assets.</description>
+  <description>P450 Gazebo models, worlds, configuration, and model generator.</description>
 
   <maintainer email="qiyh8@mail.sysu.edu.cn">Yuhua Qi</maintainer>
   <license>TODO</license>
@@ -11,10 +11,7 @@
 
   <exec_depend>gazebo_plugins</exec_depend>
   <exec_depend>gazebo_ros</exec_depend>
-  <exec_depend>mavros</exec_depend>
   <exec_depend>python3-jinja2</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>realsense_ros_gazebo</exec_depend>
-  <exec_depend>rviz</exec_depend>
-  <exec_depend>tf</exec_depend>
 </package>
