@@ -1,0 +1,104 @@
+<launch>
+  <arg name="use_sim_time" default="true"/>
+  <arg name="uav1_init_x" default="0.0"/>
+  <arg name="uav1_init_y" default="0.0"/>
+  <arg name="uav1_init_z" default="0.15"/>
+  <arg name="uav1_init_yaw" default="0.0"/>
+  <arg name="px4_workdir" default="sitl_amov_0"/>
+
+  <param name="/use_sim_time" type="bool" value="$(arg use_sim_time)"/>
+
+  <!-- This file is intentionally worldless so the same vehicle runtime can be
+       included by both the standalone and future joint-world entrypoints. -->
+  <group ns="/uav1">
+    <param
+      name="sdf_p450_D435i_0"
+      command="/usr/bin/python3 $(find prometheus_gazebo)/scripts/jinja_gen.py --stdout --mavlink_id=1 --mavlink_udp_port=14560 --mavlink_tcp_port=4560 $(find prometheus_gazebo)/gazebo_models/uav_models/p450_D435i/p450_D435i.sdf.jinja $(find prometheus_gazebo)"/>
+
+    <node
+      pkg="gazebo_ros"
+      type="spawn_model"
+      name="p450_D435i_1_spawn"
+      output="screen"
+      args="-sdf -param sdf_p450_D435i_0 -model p450_D435i_0 -x $(arg uav1_init_x) -y $(arg uav1_init_y) -z $(arg uav1_init_z) -Y $(arg uav1_init_yaw)"/>
+
+    <node
+      pkg="sim_platform_bringup"
+      type="px4_sitl_node.bash"
+      name="sitl_1"
+      cwd="ROS_HOME"
+      output="screen"
+      args="$(find px4)/ROMFS/px4fmu_common -s etc/init.d-posix/rcS -i 0 -w $(arg px4_workdir) -d">
+      <env name="PX4_SIM_MODEL" value="p450"/>
+      <env name="PX4_ESTIMATOR" value="ekf2"/>
+      <env name="PX4_SIM_SPEED_FACTOR" value="1.0"/>
+    </node>
+
+    <node pkg="mavros" type="mavros_node" name="mavros" output="screen">
+      <param name="fcu_url" value="udp://:14540@localhost:14580"/>
+      <param name="gcs_url" value=""/>
+      <param name="target_system_id" type="int" value="1"/>
+      <param name="target_component_id" type="int" value="1"/>
+      <rosparam
+        command="load"
+        file="$(find prometheus_gazebo)/config/mavros_config/px4_config_outdoor.yaml"/>
+      <rosparam
+        command="load"
+        file="$(find prometheus_gazebo)/config/mavros_config/px4_pluginlists_outdoor.yaml"/>
+      <param name="local_position/tf/send" type="bool" value="false"/>
+    </node>
+
+    <!-- The plugin already labels its samples in optical coordinates. These
+         statics connect those actual message frame IDs without duplicating the
+         estimator-owned base -> camera transform. -->
+    <node pkg="tf2_ros" type="static_transform_publisher"
+      name="p450_tf_camera_depth"
+      args="0 0 0 0 0 0 1 uav1/camera_link uav1/camera_depth_frame"/>
+    <node pkg="tf2_ros" type="static_transform_publisher"
+      name="p450_tf_camera_ired1"
+      args="-0.03 0 0 0 0 0 1 uav1/camera_link uav1/camera_ired1_frame"/>
+    <node pkg="tf2_ros" type="static_transform_publisher"
+      name="p450_tf_camera_ired2"
+      args="0.03 0 0 0 0 0 1 uav1/camera_link uav1/camera_ired2_frame"/>
+    <node pkg="tf2_ros" type="static_transform_publisher"
+      name="p450_tf_camera_imu"
+      args="0 0.12 0 0.5 -0.5 0.5 0.5 uav1/camera_link uav1/camera_imu_link"/>
+    <node pkg="tf2_ros" type="static_transform_publisher"
+      name="p450_tf_camera_d435i"
+      args="0 0 0 0 0 0 1 uav1/camera_link uav1/d435i_link"/>
+    <node pkg="tf2_ros" type="static_transform_publisher"
+      name="p450_tf_camera_color_optical"
+      args="0 0 0 0 0 0 1 uav1/camera_link uav1/camera_color_optical_frame"/>
+    <node pkg="tf2_ros" type="static_transform_publisher"
+      name="p450_tf_depth_optical"
+      args="0 0 0 0 0 0 1 uav1/camera_depth_frame uav1/camera_depth_optical_frame"/>
+  </group>
+
+  <node
+    pkg="prometheus_uav_control"
+    type="uav_control_main"
+    name="uav_control_main_1"
+    output="screen">
+    <rosparam
+      command="load"
+      file="$(find prometheus_uav_control)/launch/uav_control_outdoor.yaml"/>
+    <rosparam
+      command="load"
+      file="$(find prometheus_uav_control)/launch/sensor_tf_offset.yaml"/>
+
+    <param name="enable_px4_params_load" type="bool" value="false"/>
+    <param name="uav_id" type="int" value="1"/>
+    <param name="sim_mode" type="bool" value="true"/>
+    <param name="flag_printf" type="bool" value="false"/>
+    <param name="control/enable_external_control" type="bool" value="false"/>
+
+    <!-- Exact base -> D435 color-optical-center composite derived from the
+         imported P450 mount and D435 model, after the approximate YAML load. -->
+    <param name="D435i/offset_x" type="double" value="0.13614773689465415"/>
+    <param name="D435i/offset_y" type="double" value="0.0"/>
+    <param name="D435i/offset_z" type="double" value="0.11272472554168546"/>
+    <param name="D435i/offset_roll" type="double" value="-1.9207963267948966"/>
+    <param name="D435i/offset_pitch" type="double" value="0.0"/>
+    <param name="D435i/offset_yaw" type="double" value="-1.5707963267948966"/>
+  </node>
+</launch>

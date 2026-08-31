@@ -45,8 +45,8 @@ EXPECTED_DYNAMIC_LIFECYCLE_TOKENS = (
     "delete_respawn",
 )
 EXPECTED_JOINT_CANDIDATE_SPAWNS = frozenset({
-    ("src/p450/prometheus_gazebo/launch_basic/sitl_px4_outdoor.launch",
-     "$(arg vehicle)_$(arg uav_id)_spawn"),
+    ("src/platform/sim_platform_bringup/launch/p450_runtime.launch",
+     "p450_D435i_1_spawn"),
     ("src/ground/bunker_aubo_gazebo/launch/combined_robot.launch",
      "spawn_bunker_aubo"),
     ("src/ground/bunker_aubo_gazebo/launch/combined_robot.launch",
@@ -64,6 +64,8 @@ EXPECTED_INACTIVE_LEGACY_SPAWNS = frozenset({
     ("src/ground/ground_pick_orchestrator/launch/ground_pick_demo.launch",
      "spawn_ground_pick_obstacle"),
     ("src/p450/prometheus_gazebo/launch_basic/sitl_px4_indoor.launch",
+     "$(arg vehicle)_$(arg uav_id)_spawn"),
+    ("src/p450/prometheus_gazebo/launch_basic/sitl_px4_outdoor.launch",
      "$(arg vehicle)_$(arg uav_id)_spawn"),
     ("src/vendor/aubo_description/launch/gazebo.launch", "spawn_gazebo_model"),
     ("src/vendor/dh_ag95_description/launch/gazebo.launch",
@@ -524,14 +526,14 @@ class StartupSpawnBoundaryTest(unittest.TestCase):
         expected = (EXPECTED_JOINT_CANDIDATE_SPAWNS |
                     EXPECTED_STANDALONE_SMOKE_SPAWNS |
                     EXPECTED_INACTIVE_LEGACY_SPAWNS)
-        self.assertEqual((3, 3, 6), (
+        self.assertEqual((3, 3, 7), (
             len(JOINT_CANDIDATE_SPAWNS), len(STANDALONE_SMOKE_SPAWNS),
             len(INACTIVE_LEGACY_SPAWNS)))
         self.assertFalse(JOINT_CANDIDATE_SPAWNS & STANDALONE_SMOKE_SPAWNS)
         self.assertFalse(JOINT_CANDIDATE_SPAWNS & INACTIVE_LEGACY_SPAWNS)
         self.assertFalse(STANDALONE_SMOKE_SPAWNS & INACTIVE_LEGACY_SPAWNS)
         actual = discover_startup_spawns(ROOT)
-        self.assertEqual(12, len(actual))
+        self.assertEqual(13, len(actual))
         self.assertEqual(expected, set(actual))
         self.assertEqual((), validate_startup_spawns(ROOT))
 

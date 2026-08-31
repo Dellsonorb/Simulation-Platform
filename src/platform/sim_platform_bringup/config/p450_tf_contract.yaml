@@ -1,0 +1,56 @@
+schema_version: 1
+frame_normalization: strip_leading_slash
+
+controller:
+  node: /uav_control_main_1
+  d435i_offset:
+    translation_m: [0.13614773689465415, 0.0, 0.11272472554168546]
+    rpy_rad: [-1.9207963267948966, 0.0, -1.5707963267948966]
+
+transforms:
+  dynamic:
+    - parent: world
+      child: uav1/base_link
+      authority: /uav_control_main_1
+    - parent: uav1/base_link
+      child: uav1/camera_link
+      authority: /uav_control_main_1
+      translation_m: [0.13614773689465415, 0.0, 0.11272472554168546]
+      rotation_xyzw: [-0.5794173382492648, 0.5794173382492647, -0.4053092006556687, 0.4053092006556688]
+
+  static:
+    - parent: uav1/camera_link
+      child: uav1/camera_depth_frame
+      authority: /uav1/p450_tf_camera_depth
+      translation_m: [0.0, 0.0, 0.0]
+      rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
+    - parent: uav1/camera_link
+      child: uav1/camera_ired1_frame
+      authority: /uav1/p450_tf_camera_ired1
+      translation_m: [-0.03, 0.0, 0.0]
+      rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
+    - parent: uav1/camera_link
+      child: uav1/camera_ired2_frame
+      authority: /uav1/p450_tf_camera_ired2
+      translation_m: [0.03, 0.0, 0.0]
+      rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
+    - parent: uav1/camera_link
+      child: uav1/camera_imu_link
+      authority: /uav1/p450_tf_camera_imu
+      translation_m: [0.0, 0.12, 0.0]
+      rotation_xyzw: [0.5, -0.5, 0.5, 0.5]
+    - parent: uav1/camera_link
+      child: uav1/d435i_link
+      authority: /uav1/p450_tf_camera_d435i
+      translation_m: [0.0, 0.0, 0.0]
+      rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
+    - parent: uav1/camera_link
+      child: uav1/camera_color_optical_frame
+      authority: /uav1/p450_tf_camera_color_optical
+      translation_m: [0.0, 0.0, 0.0]
+      rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
+    - parent: uav1/camera_depth_frame
+      child: uav1/camera_depth_optical_frame
+      authority: /uav1/p450_tf_depth_optical
+      translation_m: [0.0, 0.0, 0.0]
+      rotation_xyzw: [0.0, 0.0, 0.0, 1.0]

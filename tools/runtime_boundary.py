@@ -42,8 +42,8 @@ DYNAMIC_LIFECYCLE_TOKENS = (
 )
 
 JOINT_CANDIDATE_SPAWNS = frozenset({
-    ("src/p450/prometheus_gazebo/launch_basic/sitl_px4_outdoor.launch",
-     "$(arg vehicle)_$(arg uav_id)_spawn"),
+    ("src/platform/sim_platform_bringup/launch/p450_runtime.launch",
+     "p450_D435i_1_spawn"),
     ("src/ground/bunker_aubo_gazebo/launch/combined_robot.launch",
      "spawn_bunker_aubo"),
     ("src/ground/bunker_aubo_gazebo/launch/combined_robot.launch",
@@ -63,6 +63,8 @@ INACTIVE_LEGACY_SPAWNS = frozenset({
     ("src/ground/ground_pick_orchestrator/launch/ground_pick_demo.launch",
      "spawn_ground_pick_obstacle"),
     ("src/p450/prometheus_gazebo/launch_basic/sitl_px4_indoor.launch",
+     "$(arg vehicle)_$(arg uav_id)_spawn"),
+    ("src/p450/prometheus_gazebo/launch_basic/sitl_px4_outdoor.launch",
      "$(arg vehicle)_$(arg uav_id)_spawn"),
     ("src/vendor/aubo_description/launch/gazebo.launch", "spawn_gazebo_model"),
     ("src/vendor/dh_ag95_description/launch/gazebo.launch",

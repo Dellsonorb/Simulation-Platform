@@ -1,0 +1,1096 @@
+#!/usr/bin/env python3
+"""Offline contract for the platform-owned P450 + D435 runtime."""
+
+import copy
+import json
+import math
+import os
+import re
+import shlex
+import socket
+import subprocess
+import tempfile
+import unittest
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+import yaml
+
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+RUNTIME_LAUNCH = PACKAGE_ROOT / "launch" / "p450_runtime.launch"
+STANDALONE_LAUNCH = PACKAGE_ROOT / "launch" / "p450_standalone.launch"
+TF_CONTRACT = PACKAGE_ROOT / "config" / "p450_tf_contract.yaml"
+SMOKE_SCRIPT = REPOSITORY_ROOT / "scripts" / "smoke_p450_standalone.bash"
+
+JINJA_MODEL = (
+    REPOSITORY_ROOT
+    / "src/p450/prometheus_gazebo/gazebo_models/uav_models"
+    / "p450_D435i/p450_D435i.sdf.jinja"
+)
+D435_MODEL = (
+    REPOSITORY_ROOT
+    / "src/p450/prometheus_gazebo/gazebo_models/sensor_models"
+    / "D435i/model.sdf"
+)
+REALSENSE_PLUGIN = (
+    REPOSITORY_ROOT
+    / "src/p450/realsense_ros_gazebo/src/gazebo_ros_realsense.cpp"
+)
+PERCEPTION_CONFIG = (
+    REPOSITORY_ROOT
+    / "src/p450/brick_aerial_perception/config/perception.yaml"
+)
+LEGACY_SENSOR_LAUNCH = (
+    REPOSITORY_ROOT
+    / "src/p450/prometheus_gazebo/launch_uav_with_sensor"
+    / "sitl_p450_d435i.launch"
+)
+LEGACY_TF_BRIDGE = (
+    REPOSITORY_ROOT
+    / "src/p450/brick_aerial_perception/scripts/world_tf_bridge.py"
+)
+
+EXPECTED_CONTROLLER_TRANSLATION = (
+    0.13614773689465415,
+    0.0,
+    0.11272472554168546,
+)
+EXPECTED_CONTROLLER_RPY = (
+    -1.9207963267948966,
+    0.0,
+    -1.5707963267948966,
+)
+EXPECTED_CONTROLLER_QUATERNION = (
+    -0.5794173382492648,
+    0.5794173382492647,
+    -0.4053092006556687,
+    0.4053092006556688,
+)
+EXPECTED_STATIC_TRANSFORMS = {
+    "uav1/camera_depth_frame": (
+        "uav1/camera_link", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)),
+    "uav1/camera_ired1_frame": (
+        "uav1/camera_link", (-0.03, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)),
+    "uav1/camera_ired2_frame": (
+        "uav1/camera_link", (0.03, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)),
+    "uav1/camera_imu_link": (
+        "uav1/camera_link", (0.0, 0.12, 0.0), (0.5, -0.5, 0.5, 0.5)),
+    "uav1/d435i_link": (
+        "uav1/camera_link", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)),
+    "uav1/camera_color_optical_frame": (
+        "uav1/camera_link", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)),
+    "uav1/camera_depth_optical_frame": (
+        "uav1/camera_depth_frame", (0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0, 1.0)),
+}
+
+
+def _require_file(path):
+    if not path.is_file():
+        raise AssertionError("required artifact is missing: %s" % path)
+    return path
+
+
+def _read(path):
+    return _require_file(path).read_text(encoding="utf-8")
+
+
+def _xml(path):
+    return ET.parse(str(_require_file(path))).getroot()
+
+
+def _yaml(path):
+    with _require_file(path).open(encoding="utf-8") as stream:
+        return yaml.safe_load(stream)
+
+
+def _nodes(root, package=None, node_type=None):
+    nodes = root.findall(".//node")
+    if package is not None:
+        nodes = [node for node in nodes if node.get("pkg") == package]
+    if node_type is not None:
+        nodes = [node for node in nodes if node.get("type") == node_type]
+    return nodes
+
+
+def _one(nodes, description):
+    if len(nodes) != 1:
+        raise AssertionError(
+            "expected exactly one %s, found %d" % (description, len(nodes)))
+    return nodes[0]
+
+
+def _param_map(node):
+    parameters = node.findall("./param")
+    names = [parameter.get("name") for parameter in parameters]
+    if len(names) != len(set(names)):
+        raise AssertionError("duplicate parameter names on node %s" % node.get("name"))
+    return {parameter.get("name"): parameter for parameter in parameters}
+
+
+def _floats(values):
+    return tuple(float(value) for value in values)
+
+
+def _assert_float_tuple(test, actual, expected, places=12):
+    test.assertEqual(len(expected), len(actual))
+    for actual_value, expected_value in zip(actual, expected):
+        test.assertAlmostEqual(expected_value, actual_value, places=places)
+
+
+def _quaternion_from_rpy(roll, pitch, yaw):
+    cr = math.cos(roll / 2.0)
+    sr = math.sin(roll / 2.0)
+    cp = math.cos(pitch / 2.0)
+    sp = math.sin(pitch / 2.0)
+    cy = math.cos(yaw / 2.0)
+    sy = math.sin(yaw / 2.0)
+    return (
+        sr * cp * cy - cr * sp * sy,
+        cr * sp * cy + sr * cp * sy,
+        cr * cp * sy - sr * sp * cy,
+        cr * cp * cy + sr * sp * sy,
+    )
+
+
+class ArtifactMaterializationTest(unittest.TestCase):
+    def test_all_task5_artifacts_exist(self):
+        missing = [
+            str(path.relative_to(REPOSITORY_ROOT))
+            for path in (RUNTIME_LAUNCH, STANDALONE_LAUNCH, TF_CONTRACT,
+                         SMOKE_SCRIPT)
+            if not path.is_file()
+        ]
+        self.assertEqual([], missing)
+
+    def test_smoke_entrypoint_is_executable(self):
+        _require_file(SMOKE_SCRIPT)
+        self.assertTrue(os.access(str(SMOKE_SCRIPT), os.X_OK))
+
+
+class RuntimeLaunchContractTest(unittest.TestCase):
+    def setUp(self):
+        self.root = _xml(RUNTIME_LAUNCH)
+        self.source = _read(RUNTIME_LAUNCH)
+
+    def test_runtime_is_worldless_and_fixed_to_one_uav1(self):
+        self.assertEqual("launch", self.root.tag)
+        self.assertEqual([], self.root.findall(".//include"))
+        self.assertEqual([], _nodes(self.root, "gazebo_ros", "gzserver"))
+        self.assertEqual([], _nodes(self.root, "gazebo_ros", "gzclient"))
+
+        arguments = {arg.get("name"): arg.get("default")
+                     for arg in self.root.findall("./arg")}
+        self.assertEqual({
+            "use_sim_time": "true",
+            "uav1_init_x": "0.0",
+            "uav1_init_y": "0.0",
+            "uav1_init_z": "0.15",
+            "uav1_init_yaw": "0.0",
+            "px4_workdir": "sitl_amov_0",
+        }, arguments)
+        use_sim_time = _one(
+            [param for param in self.root.findall("./param")
+             if param.get("name") == "/use_sim_time"],
+            "/use_sim_time parameter")
+        self.assertEqual("bool", use_sim_time.get("type"))
+        self.assertEqual("$(arg use_sim_time)", use_sim_time.get("value"))
+
+        groups = self.root.findall("./group")
+        self.assertEqual(["/uav1"], [group.get("ns") for group in groups])
+        self.assertNotIn("world_tf_bridge.py", self.source)
+
+    def test_model_is_rendered_and_spawned_exactly_once(self):
+        group = _one(self.root.findall("./group"), "uav1 group")
+        sdf_parameter = _one(
+            [param for param in group.findall("./param")
+             if param.get("name") == "sdf_p450_D435i_0"],
+            "rendered P450 SDF parameter")
+        self.assertEqual(
+            "/usr/bin/python3 "
+            "$(find prometheus_gazebo)/scripts/jinja_gen.py --stdout "
+            "--mavlink_id=1 --mavlink_udp_port=14560 "
+            "--mavlink_tcp_port=4560 "
+            "$(find prometheus_gazebo)/gazebo_models/uav_models/"
+            "p450_D435i/p450_D435i.sdf.jinja "
+            "$(find prometheus_gazebo)",
+            sdf_parameter.get("command"),
+        )
+
+        spawns = _nodes(self.root, "gazebo_ros", "spawn_model")
+        spawn = _one(spawns, "P450 spawn node")
+        self.assertEqual("p450_D435i_1_spawn", spawn.get("name"))
+        self.assertEqual(
+            "-sdf -param sdf_p450_D435i_0 -model p450_D435i_0 "
+            "-x $(arg uav1_init_x) -y $(arg uav1_init_y) "
+            "-z $(arg uav1_init_z) -Y $(arg uav1_init_yaw)",
+            spawn.get("args"),
+        )
+
+    def test_px4_uses_only_the_platform_wrapper(self):
+        px4 = _one(
+            _nodes(self.root, "sim_platform_bringup", "px4_sitl_node.bash"),
+            "platform PX4 wrapper node")
+        self.assertEqual("sitl_1", px4.get("name"))
+        self.assertEqual("ROS_HOME", px4.get("cwd"))
+        self.assertEqual(
+            ["$(find", "px4)/ROMFS/px4fmu_common", "-s",
+             "etc/init.d-posix/rcS", "-i", "0", "-w",
+             "$(arg", "px4_workdir)",
+             "-d"],
+            shlex.split(px4.get("args")),
+        )
+        environment = {item.get("name"): item.get("value")
+                       for item in px4.findall("./env")}
+        self.assertEqual({
+            "PX4_SIM_MODEL": "p450",
+            "PX4_ESTIMATOR": "ekf2",
+            "PX4_SIM_SPEED_FACTOR": "1.0",
+        }, environment)
+        self.assertEqual([], _nodes(self.root, "px4", "px4"))
+
+    def test_mavros_ports_identity_and_tf_override_are_exact(self):
+        mavros = _one(_nodes(self.root, "mavros", "mavros_node"), "MAVROS")
+        self.assertEqual("mavros", mavros.get("name"))
+        parameters = _param_map(mavros)
+        expected_values = {
+            "fcu_url": "udp://:14540@localhost:14580",
+            "gcs_url": "",
+            "target_system_id": "1",
+            "target_component_id": "1",
+            "local_position/tf/send": "false",
+        }
+        self.assertEqual(expected_values,
+                         {name: parameters[name].get("value")
+                          for name in expected_values})
+        self.assertEqual("bool", parameters["local_position/tf/send"].get("type"))
+
+        children = list(mavros)
+        loads = [child for child in children if child.tag == "rosparam"]
+        self.assertEqual([
+            "$(find prometheus_gazebo)/config/mavros_config/"
+            "px4_config_outdoor.yaml",
+            "$(find prometheus_gazebo)/config/mavros_config/"
+            "px4_pluginlists_outdoor.yaml",
+        ], [load.get("file") for load in loads])
+        self.assertTrue(all(load.get("command") == "load" for load in loads))
+        self.assertGreater(
+            children.index(parameters["local_position/tf/send"]),
+            max(children.index(load) for load in loads),
+        )
+
+    def test_controller_load_order_and_exact_model_offsets(self):
+        controller = _one(
+            _nodes(self.root, "prometheus_uav_control", "uav_control_main"),
+            "Prometheus UAV controller")
+        self.assertEqual("uav_control_main_1", controller.get("name"))
+        self.assertIs(controller, _one(
+            [node for node in self.root.findall("./node")
+             if node.get("name") == "uav_control_main_1"],
+            "root controller"))
+        self.assertEqual([], _nodes(self.root, "prometheus_uav_control", "joy_node"))
+
+        children = list(controller)
+        loads = [child for child in children if child.tag == "rosparam"]
+        self.assertEqual([
+            "$(find prometheus_uav_control)/launch/uav_control_outdoor.yaml",
+            "$(find prometheus_uav_control)/launch/sensor_tf_offset.yaml",
+        ], [load.get("file") for load in loads])
+        parameters = _param_map(controller)
+        expected_values = {
+            "uav_id": "1",
+            "sim_mode": "true",
+            "flag_printf": "false",
+            "control/enable_external_control": "false",
+            "D435i/offset_x": str(EXPECTED_CONTROLLER_TRANSLATION[0]),
+            "D435i/offset_y": str(EXPECTED_CONTROLLER_TRANSLATION[1]),
+            "D435i/offset_z": str(EXPECTED_CONTROLLER_TRANSLATION[2]),
+            "D435i/offset_roll": str(EXPECTED_CONTROLLER_RPY[0]),
+            "D435i/offset_pitch": str(EXPECTED_CONTROLLER_RPY[1]),
+            "D435i/offset_yaw": str(EXPECTED_CONTROLLER_RPY[2]),
+        }
+        self.assertEqual(expected_values,
+                         {name: parameters[name].get("value")
+                          for name in expected_values})
+        last_load_index = max(children.index(load) for load in loads)
+        for name in expected_values:
+            self.assertGreater(children.index(parameters[name]), last_load_index)
+
+    def test_controller_disables_startup_px4_parameter_mutation(self):
+        controller = _one(
+            _nodes(self.root, "prometheus_uav_control", "uav_control_main"),
+            "Prometheus UAV controller")
+        children = list(controller)
+        loads = [child for child in children if child.tag == "rosparam"]
+        self.assertTrue(loads)
+
+        parameters = _param_map(controller)
+        self.assertIn("enable_px4_params_load", parameters)
+        policy = parameters["enable_px4_params_load"]
+        self.assertEqual("bool", policy.get("type"))
+        self.assertEqual("false", policy.get("value"))
+        self.assertGreater(
+            children.index(policy),
+            max(children.index(load) for load in loads),
+            "the local no-mutation policy must override inherited YAML",
+        )
+
+    def test_static_tf_nodes_match_the_unique_authority_matrix(self):
+        nodes = _nodes(self.root, "tf2_ros", "static_transform_publisher")
+        self.assertEqual(7, len(nodes))
+        actual = {}
+        for node in nodes:
+            arguments = shlex.split(node.get("args"))
+            self.assertEqual(9, len(arguments))
+            translation = _floats(arguments[:3])
+            rotation = _floats(arguments[3:7])
+            parent, child = arguments[7:]
+            self.assertNotIn(child, actual)
+            actual[child] = (parent, translation, rotation)
+        self.assertEqual(set(EXPECTED_STATIC_TRANSFORMS), set(actual))
+        for child, expected in EXPECTED_STATIC_TRANSFORMS.items():
+            self.assertEqual(expected[0], actual[child][0])
+            _assert_float_tuple(self, actual[child][1], expected[1])
+            _assert_float_tuple(self, actual[child][2], expected[2])
+
+
+class StandaloneLaunchContractTest(unittest.TestCase):
+    def setUp(self):
+        self.root = _xml(STANDALONE_LAUNCH)
+
+    def test_standalone_owns_one_world_and_includes_one_runtime(self):
+        self.assertEqual([], self.root.findall(".//node"))
+        arguments = {arg.get("name"): arg.get("default")
+                     for arg in self.root.findall("./arg")}
+        self.assertEqual({
+            "gui": "true",
+            "use_sim_time": "true",
+            "world": "$(find prometheus_gazebo)/gazebo_worlds/"
+                     "prometheus_empty.world",
+            "uav1_init_x": "0.0",
+            "uav1_init_y": "0.0",
+            "uav1_init_z": "0.15",
+            "uav1_init_yaw": "0.0",
+            "px4_workdir": "sitl_amov_0",
+        }, arguments)
+        includes = self.root.findall("./include")
+        self.assertEqual([
+            "$(find gazebo_ros)/launch/empty_world.launch",
+            "$(find sim_platform_bringup)/launch/p450_runtime.launch",
+        ], [include.get("file") for include in includes])
+
+        world_args = {arg.get("name"): arg.get("value")
+                      for arg in includes[0].findall("./arg")}
+        self.assertEqual({
+            "world_name": "$(arg world)",
+            "gui": "$(arg gui)",
+            "use_sim_time": "$(arg use_sim_time)",
+        }, world_args)
+        runtime_args = {arg.get("name"): arg.get("value")
+                        for arg in includes[1].findall("./arg")}
+        self.assertEqual({
+            "use_sim_time": "$(arg use_sim_time)",
+            "uav1_init_x": "$(arg uav1_init_x)",
+            "uav1_init_y": "$(arg uav1_init_y)",
+            "uav1_init_z": "$(arg uav1_init_z)",
+            "uav1_init_yaw": "$(arg uav1_init_yaw)",
+            "px4_workdir": "$(arg px4_workdir)",
+        }, runtime_args)
+
+
+class TfContractTest(unittest.TestCase):
+    def setUp(self):
+        self.contract = _yaml(TF_CONTRACT)
+
+    def test_dynamic_and_static_children_have_one_canonical_authority(self):
+        self.assertEqual(1, self.contract["schema_version"])
+        self.assertEqual("strip_leading_slash",
+                         self.contract["frame_normalization"])
+        transforms = self.contract["transforms"]
+        dynamic = transforms["dynamic"]
+        self.assertEqual([
+            ("world", "uav1/base_link", "/uav_control_main_1"),
+            ("uav1/base_link", "uav1/camera_link", "/uav_control_main_1"),
+        ], [(item["parent"], item["child"], item["authority"])
+            for item in dynamic])
+        _assert_float_tuple(
+            self, tuple(dynamic[1]["translation_m"]),
+            EXPECTED_CONTROLLER_TRANSLATION)
+        _assert_float_tuple(
+            self, tuple(dynamic[1]["rotation_xyzw"]),
+            EXPECTED_CONTROLLER_QUATERNION)
+
+        static = transforms["static"]
+        children = [item["child"] for item in static]
+        self.assertEqual(len(children), len(set(children)))
+        self.assertEqual(set(EXPECTED_STATIC_TRANSFORMS), set(children))
+        all_frames = [item[key] for family in (dynamic, static)
+                      for item in family for key in ("parent", "child")]
+        self.assertTrue(all(not frame.startswith("/") for frame in all_frames))
+
+        for item in static:
+            parent, translation, rotation = EXPECTED_STATIC_TRANSFORMS[item["child"]]
+            self.assertEqual(parent, item["parent"])
+            _assert_float_tuple(self, tuple(item["translation_m"]), translation)
+            _assert_float_tuple(self, tuple(item["rotation_xyzw"]), rotation)
+            self.assertAlmostEqual(
+                1.0,
+                math.sqrt(sum(value * value
+                              for value in item["rotation_xyzw"])),
+                places=12,
+            )
+
+    def test_controller_contract_matches_model_derived_composite(self):
+        controller = self.contract["controller"]
+        self.assertEqual("/uav_control_main_1", controller["node"])
+        offset = controller["d435i_offset"]
+        _assert_float_tuple(
+            self, tuple(offset["translation_m"]), EXPECTED_CONTROLLER_TRANSLATION)
+        _assert_float_tuple(
+            self, tuple(offset["rpy_rad"]), EXPECTED_CONTROLLER_RPY)
+
+
+class ImportedSensorEvidenceTest(unittest.TestCase):
+    def test_model_geometry_recomputes_the_controller_camera_transform(self):
+        jinja = _read(JINJA_MODEL)
+        include = re.search(
+            r"<include>\s*<uri>model://D435i</uri>\s*"
+            r"<pose>([^<]+)</pose>.*?</include>",
+            jinja,
+            flags=re.DOTALL,
+        )
+        self.assertIsNotNone(include)
+        mount = _floats(include.group(1).split())
+        self.assertEqual((0.095, 0.0, 0.0, 0.0, 0.35, 0.0), mount)
+
+        model = _xml(D435_MODEL)
+        poses = {
+            link.get("name"): _floats(link.findtext("pose").split())
+            for link in model.findall("./model/link")
+            if link.find("pose") is not None
+        }
+        self.assertEqual((0.0, 0.0, 0.12, 0.0, 0.0, 0.0),
+                         poses["camera_color_frame"])
+        self.assertEqual((0.0, 0.0, 0.12, 0.0, 0.0, 0.0),
+                         poses["camera_depth_frame"])
+        self.assertEqual((0.0, 0.03, 0.12, 0.0, 0.0, 0.0),
+                         poses["camera_ired1_frame"])
+        self.assertEqual((0.0, -0.03, 0.12, 0.0, 0.0, 0.0),
+                         poses["camera_ired2_frame"])
+
+        pitch = mount[4]
+        sensor_z = poses["camera_color_frame"][2]
+        translation = (
+            mount[0] + math.sin(pitch) * sensor_z,
+            mount[1],
+            mount[2] + math.cos(pitch) * sensor_z,
+        )
+        rpy = (-math.pi / 2.0 - pitch, 0.0, -math.pi / 2.0)
+        _assert_float_tuple(self, translation, EXPECTED_CONTROLLER_TRANSLATION)
+        _assert_float_tuple(self, rpy, EXPECTED_CONTROLLER_RPY)
+        _assert_float_tuple(
+            self,
+            _quaternion_from_rpy(*rpy),
+            EXPECTED_CONTROLLER_QUATERNION,
+        )
+
+    def test_plugin_message_frames_and_perception_alias_are_connected(self):
+        jinja = _read(JINJA_MODEL)
+        expected_frames = {
+            "colorOpticalframeName": "uav1/camera_link",
+            "depthOpticalframeName": "uav1/camera_depth_frame",
+            "infrared1OpticalframeName": "uav1/camera_ired1_frame",
+            "infrared2OpticalframeName": "uav1/camera_ired2_frame",
+            "frameName": "uav1/camera_imu_link",
+        }
+        for tag, expected in expected_frames.items():
+            values = re.findall(r"<%s>([^<]+)</%s>" % (tag, tag), jinja)
+            normalized = {
+                value.replace("{{ mavlink_id }}", "1").lstrip("/")
+                for value in values
+            }
+            self.assertIn(expected, normalized, msg=tag)
+
+        expected_topics = {
+            "depthTopicName": "/uav1/camera/depth/image_raw",
+            "depthCameraInfoTopicName": "/uav1/camera/depth/camera_info",
+            "colorTopicName": "/uav1/camera/color/image_raw",
+            "colorCameraInfoTopicName": "/uav1/camera/color/camera_info",
+            "topicName": "/uav1/camera/imu",
+        }
+        for tag, expected in expected_topics.items():
+            values = re.findall(r"<%s>([^<]+)</%s>" % (tag, tag), jinja)
+            rendered = {value.replace("{{ mavlink_id }}", "1") for value in values}
+            self.assertIn(expected, rendered, msg=tag)
+
+        plugin = _read(REALSENSE_PLUGIN)
+        self.assertIn('sub_str + "/d435i_link"', plugin)
+        perception = _yaml(PERCEPTION_CONFIG)
+        self.assertEqual("uav1/camera_color_optical_frame",
+                         perception["camera_optical_frame"])
+        self.assertIn("uav1/camera_color_optical_frame",
+                      EXPECTED_STATIC_TRANSFORMS)
+
+    def test_known_legacy_duplicate_publishers_are_not_reachable(self):
+        legacy_launch = _read(LEGACY_SENSOR_LAUNCH)
+        legacy_bridge = _read(LEGACY_TF_BRIDGE)
+        self.assertIn("tf_base_camera_$(arg uav1_id)", legacy_launch)
+        self.assertIn("tf_base_camera_imu_$(arg uav1_id)", legacy_launch)
+        self.assertIn("tf_mavros_base_$(arg uav1_id)", legacy_launch)
+        self.assertIn("camera_color_optical_frame", legacy_bridge)
+        self.assertIn("camera_depth_optical_frame", legacy_bridge)
+
+        active = _read(RUNTIME_LAUNCH) + _read(STANDALONE_LAUNCH)
+        forbidden = (
+            "sitl_p450_d435i.launch",
+            "sitl_outdoor_1uav_P450.launch",
+            "sitl_px4_outdoor.launch",
+            "uav_control_main_outdoor.launch",
+            "mavros/px4.launch",
+            "world_tf_bridge.py",
+            "tf_base_camera_",
+            "tf_mavros_base_",
+        )
+        for token in forbidden:
+            self.assertNotIn(token, active)
+
+
+class PackageAndSmokeContractTest(unittest.TestCase):
+    def test_smoke_uses_a_fresh_run_local_px4_workdir(self):
+        source = _read(SMOKE_SCRIPT)
+        self.assertIn(
+            'p450_px4_workdir="sitl_smoke_$p450_run_id"', source)
+        self.assertIn(
+            '[[ ! -e "$p450_px4_work_path" ]]', source)
+        self.assertIn(
+            'px4_workdir:="$p450_px4_workdir"', source)
+
+    def test_smoke_shutdown_is_ordered_and_checks_launcher_status(self):
+        source = _read(SMOKE_SCRIPT)
+        graceful = 'kill -INT "$p450_roslaunch_pid"'
+        term_group = 'kill -TERM -- -"$p450_launch_pgid"'
+        kill_group = 'kill -KILL -- -"$p450_launch_pgid"'
+        launcher_wait = 'wait "$p450_launch_pid" 2>/dev/null'
+        self.assertIn(graceful, source)
+        cleanup = re.search(
+            r"^p450_cleanup\(\) \{\n(?P<body>.*?)^\}\n",
+            source,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(cleanup)
+        body = cleanup.group("body")
+        for token in (term_group, kill_group, launcher_wait):
+            self.assertEqual(1, body.count(token), token)
+        self.assertLess(body.index(graceful), body.index(term_group))
+        self.assertLess(body.index(term_group), body.index(kill_group))
+        self.assertLess(body.index(kill_group), body.index(launcher_wait))
+        self.assertIn(
+            'if p450_pid_is_alive "$p450_launch_pid"; then',
+            body[:body.index(launcher_wait)],
+            "the shell must not wait unless the owned launcher is already "
+            "stopped or a zombie",
+        )
+        self.assertIn(
+            'p450_wait_for_group_exit 40', body,
+            "TERM and KILL group-exit polls must have explicit finite bounds",
+        )
+        self.assertIn(
+            'p450_wait_for_pid_exit "$p450_roslaunch_pid" 60', body,
+            "the graceful roslaunch poll must have an explicit finite bound",
+        )
+        self.assertIn('p450_launch_status="$?"', source)
+        self.assertNotIn(
+            'wait "$p450_launch_pid" 2>/dev/null || true', source)
+
+    def test_smoke_result_manifest_is_valid_for_pass_and_failure(self):
+        source = _read(SMOKE_SCRIPT)
+        guard = 'if [[ "${1:-}" == "--test-result-manifest" ]]'
+        self.assertIn(
+            guard,
+            source,
+            "offline result-manifest mode must exist before this test may "
+            "execute the smoke script",
+        )
+        self.assertLess(source.index(guard), source.index("p450_script_path="))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            gps = root / "SIM overlay/libgazebo_gps_plugin.so"
+            groundtruth = (
+                root / "SIM overlay/libgazebo_groundtruth_plugin.so")
+            gps.parent.mkdir()
+            gps.write_bytes(b"gps")
+            groundtruth.write_bytes(b"groundtruth")
+            cases = (
+                ("PASS", "0", "0", "0", 0, 0, False),
+                ("FAIL", "7", "137", "1", 7, 137, True),
+                ("FAIL", "9", "", "1", 9, None, True),
+            )
+            for (verdict, script_status, launcher_status, escalated,
+                 expected_script_status, expected_launcher_status,
+                 expected_escalated) in cases:
+                with self.subTest(verdict=verdict,
+                                  launcher_status=launcher_status):
+                    manifest = root / (
+                        "result-%s-%s.json" %
+                        (verdict.lower(), launcher_status or "none"))
+                    result = subprocess.run(
+                        [
+                            str(SMOKE_SCRIPT), "--test-result-manifest",
+                            str(manifest), verdict, script_status,
+                            launcher_status, escalated, "run id/with spaces",
+                            "sitl smoke workdir", str(gps), str(groundtruth),
+                        ],
+                        cwd=str(REPOSITORY_ROOT),
+                        env={
+                            "PATH": "/usr/bin:/bin",
+                            "LANG": "C.UTF-8",
+                            "LC_ALL": "C.UTF-8",
+                        },
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=3.0,
+                        check=False,
+                    )
+                    self.assertEqual(
+                        0, result.returncode,
+                        "stdout={!r} stderr={!r}".format(
+                            result.stdout, result.stderr),
+                    )
+                    self.assertEqual(
+                        {
+                            "schema_version": 1,
+                            "verdict": verdict,
+                            "script_status": expected_script_status,
+                            "launcher_status": expected_launcher_status,
+                            "shutdown_escalated": expected_escalated,
+                            "run_id": "run id/with spaces",
+                            "px4_workdir": "sitl smoke workdir",
+                            "plugins": {
+                                "gps": str(gps.resolve()),
+                                "groundtruth": str(groundtruth.resolve()),
+                            },
+                        },
+                        json.loads(manifest.read_text(encoding="utf-8")),
+                    )
+
+    def test_package_installs_runtime_assets_and_declares_dependencies(self):
+        cmake = _read(PACKAGE_ROOT / "CMakeLists.txt")
+        self.assertIn("cmake_minimum_required(VERSION 3.0.2)", cmake)
+        self.assertRegex(
+            cmake,
+            r"install\s*\(\s*DIRECTORY\s+launch\s+config\s+"
+            r"DESTINATION\s+\$\{CATKIN_PACKAGE_SHARE_DESTINATION\}\s*\)",
+        )
+        self.assertIn(
+            "catkin_add_nosetests(test/test_p450_launch_contract.py)", cmake)
+
+        manifest = _xml(PACKAGE_ROOT / "package.xml")
+        dependencies = {item.text.strip() for item in manifest.findall("exec_depend")}
+        self.assertTrue({
+            "gazebo_ros",
+            "mavros",
+            "prometheus_gazebo",
+            "prometheus_uav_control",
+            "realsense_ros_gazebo",
+            "gazebo_plugins",
+            "roslaunch",
+            "tf2_ros",
+            "python3-jinja2",
+            "python3-numpy",
+            "python3-rospkg",
+            "python3-yaml",
+        }.issubset(dependencies))
+
+    def test_smoke_script_is_isolated_bounded_and_checks_live_state(self):
+        source = _read(SMOKE_SCRIPT)
+        required_tokens = (
+            "P450_SMOKE_INNER",
+            "scripts/with_p450_env.bash",
+            "ROS_MASTER_URI",
+            "GAZEBO_MASTER_URI",
+            "127.0.0.1",
+            "4560",
+            "14540",
+            "14560",
+            "14580",
+            "/usr/bin/ss",
+            "/usr/bin/setsid",
+            "/usr/bin/timeout",
+            "trap",
+            "kill -TERM -- -",
+            "logs/",
+            "p450_standalone.launch",
+            "gui:=false",
+            "/gazebo/get_world_properties",
+            "p450_D435i_0",
+            "/uav1/mavros",
+            "/uav1/sitl_1",
+            "/uav_control_main_1",
+            "/uav1/mavros/state",
+            "/uav1/prometheus/state",
+            "/uav1/camera/color/image_raw",
+            "/uav1/camera/color/camera_info",
+            "/uav1/camera/depth/image_raw",
+            "/uav1/camera/depth/camera_info",
+            "/uav1/camera/imu",
+            "/tf",
+            "/tf_static",
+            "connected",
+            "armed",
+            "odom_valid",
+            "frame_id",
+            "stamp",
+        )
+        for token in required_tokens:
+            self.assertIn(token, source)
+        self.assertNotRegex(source, r"\b(?:pkill|killall)\b")
+        self.assertNotIn("rosnode kill", source)
+        self.assertNotIn("/mavros/cmd/arming", source)
+        self.assertNotRegex(source, r"\b(?:takeoff|OFFBOARD)\b")
+
+    def test_smoke_process_probe_follows_launch_ppid_tree(self):
+        source = _read(SMOKE_SCRIPT)
+        guard = 'if [[ "${1:-}" == "--test-process-tree" ]]'
+        self.assertIn(
+            guard,
+            source,
+            "offline process-tree mode must exist before this test may execute "
+            "the smoke script",
+        )
+        self.assertLess(
+            source.index(guard),
+            source.index("p450_script_path="),
+            "offline process-tree mode must return before wrapper/preflight/launch",
+        )
+
+        process_table = """\
+100 1 100 Ss /usr/bin/setsid --wait root-self
+101 100 100 S /usr/bin/timeout 300s roslaunch
+102 101 100 Sl /usr/bin/python3 /opt/ros/noetic/bin/roslaunch
+201 102 201 Ssl /usr/bin/gzserver --verbose
+202 102 202 Ssl /opt/px4/build/amovlab_sitl_default/bin/px4 -d
+203 102 203 Z [zombie-only] <defunct>
+300 1 300 Ssl /usr/bin/ambient-only
+501 9999 501 Ssl /usr/bin/missing-chain
+600 601 600 S /usr/bin/cycle-only
+601 600 601 S /bin/sh
+"""
+        cases = (
+            ("100", "gzserver", 0),
+            ("100", "/opt/px4/build/amovlab_sitl_default/bin/px4", 0),
+            ("100", "zombie-only", 1),
+            ("100", "ambient-only", 1),
+            ("100", "missing-chain", 1),
+            ("100", "cycle-only", 1),
+            ("100", "root-self", 1),
+            ("0", "gzserver", 64),
+            ("not-a-pid", "gzserver", 64),
+            ("1", "gzserver", 64),
+            ("100", "", 64),
+        )
+        for root_pid, needle, expected_status in cases:
+            with self.subTest(root_pid=root_pid, needle=needle):
+                result = subprocess.run(
+                    [str(SMOKE_SCRIPT), "--test-process-tree",
+                     root_pid, needle],
+                    cwd=str(REPOSITORY_ROOT),
+                    env={
+                        "PATH": "/usr/bin:/bin",
+                        "LANG": "C.UTF-8",
+                        "LC_ALL": "C.UTF-8",
+                    },
+                    input=process_table,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=3.0,
+                    check=False,
+                )
+                self.assertEqual(
+                    expected_status,
+                    result.returncode,
+                    "stdout={!r} stderr={!r}".format(
+                        result.stdout, result.stderr),
+                )
+
+    def test_smoke_log_probe_rejects_fatal_runtime_events(self):
+        source = _read(SMOKE_SCRIPT)
+        guard = 'if [[ "${1:-}" == "--test-launch-log" ]]'
+        self.assertIn(
+            guard,
+            source,
+            "offline launch-log mode must exist before this test may execute "
+            "the smoke script",
+        )
+        self.assertLess(source.index(guard), source.index("p450_script_path="))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cases = (
+                (
+                    "clean.log",
+                    "INFO [px4] Startup script returned successfully\n"
+                    "process has finished cleanly\n",
+                    0,
+                ),
+                ("startup-missing.log", "process has finished cleanly\n", 1),
+                (
+                    "startup-twice.log",
+                    "Startup script returned successfully\n"
+                    "Startup script returned successfully\n",
+                    1,
+                ),
+                (
+                    "startup-failed.log",
+                    "ERROR [px4] Startup script returned with return value: 2\n",
+                    1,
+                ),
+                ("segv.log", "Segmentation fault (core dumped)\n", 1),
+                (
+                    "assert.log",
+                    "gzserver: model.cc:42: Assertion `px != 0' failed.\n",
+                    1,
+                ),
+                ("reboot.log", "[uav_controller_uav1] Reboot PX4!\n", 1),
+                ("died.log", "[gazebo-2] process has died [pid 42]\n", 1),
+                ("missing.log", None, 66),
+            )
+            for filename, contents, expected_status in cases:
+                with self.subTest(filename=filename):
+                    launch_log = root / filename
+                    if contents is not None:
+                        launch_log.write_text(contents, encoding="utf-8")
+                    result = subprocess.run(
+                        [str(SMOKE_SCRIPT), "--test-launch-log",
+                         str(launch_log)],
+                        cwd=str(REPOSITORY_ROOT),
+                        env={
+                            "PATH": "/usr/bin:/bin",
+                            "LANG": "C.UTF-8",
+                            "LC_ALL": "C.UTF-8",
+                        },
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=3.0,
+                        check=False,
+                    )
+                    self.assertEqual(
+                        expected_status,
+                        result.returncode,
+                        "stdout={!r} stderr={!r}".format(
+                            result.stdout, result.stderr),
+                    )
+
+    def test_smoke_tf_authority_probe_rejects_any_duplicate_child(self):
+        source = _read(SMOKE_SCRIPT)
+        guard = 'if [[ "${1:-}" == "--test-tf-authorities" ]]'
+        self.assertIn(guard, source)
+        self.assertLess(source.index(guard), source.index("p450_script_path="))
+
+        expected = {
+            "uav1/base_link": ["/uav_control_main_1"],
+            "uav1/camera_link": ["/uav_control_main_1"],
+            "uav1/camera_depth_frame": ["/uav1/p450_tf_camera_depth"],
+            "uav1/camera_ired1_frame": ["/uav1/p450_tf_camera_ired1"],
+            "uav1/camera_ired2_frame": ["/uav1/p450_tf_camera_ired2"],
+            "uav1/camera_imu_link": ["/uav1/p450_tf_camera_imu"],
+            "uav1/d435i_link": ["/uav1/p450_tf_camera_d435i"],
+            "uav1/camera_color_optical_frame": [
+                "/uav1/p450_tf_camera_color_optical"],
+            "uav1/camera_depth_optical_frame": [
+                "/uav1/p450_tf_depth_optical"],
+            "uav1/lidar_link": ["/one_lidar_authority"],
+        }
+        duplicate = copy.deepcopy(expected)
+        duplicate["uav1/lidar_link"].append("/second_lidar_authority")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cases = (
+                ("valid.json", expected, 0),
+                ("duplicate.json", duplicate, 1),
+                ("malformed.json", [], 65),
+            )
+            for filename, payload, expected_status in cases:
+                with self.subTest(filename=filename):
+                    path = root / filename
+                    path.write_text(json.dumps(payload), encoding="utf-8")
+                    result = subprocess.run(
+                        [str(SMOKE_SCRIPT), "--test-tf-authorities", str(path)],
+                        cwd=str(REPOSITORY_ROOT),
+                        env={
+                            "PATH": "/usr/bin:/bin",
+                            "LANG": "C.UTF-8",
+                            "LC_ALL": "C.UTF-8",
+                        },
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=3.0,
+                        check=False,
+                    )
+                    self.assertEqual(
+                        expected_status,
+                        result.returncode,
+                        "stdout={!r} stderr={!r}".format(
+                            result.stdout, result.stderr),
+                    )
+
+    def test_smoke_plugin_maps_probe_requires_only_exact_sim_plugin(self):
+        source = _read(SMOKE_SCRIPT)
+        guard = 'if [[ "${1:-}" == "--test-plugin-maps" ]]'
+        self.assertIn(
+            guard,
+            source,
+            "offline plugin-map mode must exist before this test may execute "
+            "the smoke script",
+        )
+        self.assertLess(source.index(guard), source.index("p450_script_path="))
+        self.assertIn(
+            'p450_gzserver_executable="$(/usr/bin/realpath -e -- '
+            '/usr/bin/gzserver)"',
+            source,
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            local_plugin = (
+                root / "local overlay/libgazebo_groundtruth_plugin.so")
+            external_plugin = (
+                root / "external px4/libgazebo_groundtruth_plugin.so")
+            third_plugin = (
+                root / "third copy/libgazebo_groundtruth_plugin.so")
+            local_plugin.parent.mkdir()
+            external_plugin.parent.mkdir()
+            third_plugin.parent.mkdir()
+            local_plugin.write_bytes(b"local")
+            external_plugin.write_bytes(b"external")
+            third_plugin.write_bytes(b"third")
+            prefix = "7f000000-7f001000 r-xp 00000000 08:01 42 "
+            proc_path = lambda path: str(path).replace(" ", r"\040")
+            cases = (
+                ("local.maps", prefix + proc_path(local_plugin) + "\n", 0),
+                (
+                    "both.maps",
+                    prefix + proc_path(local_plugin) + "\n" +
+                    prefix + proc_path(external_plugin) + "\n",
+                    1,
+                ),
+                (
+                    "third.maps",
+                    prefix + proc_path(local_plugin) + "\n" +
+                    prefix + proc_path(third_plugin) + "\n",
+                    1,
+                ),
+                (
+                    "external.maps",
+                    prefix + proc_path(external_plugin) + "\n",
+                    1,
+                ),
+                ("missing.maps", None, 66),
+            )
+            for filename, contents, expected_status in cases:
+                with self.subTest(filename=filename):
+                    maps = root / filename
+                    if contents is not None:
+                        maps.write_text(contents, encoding="utf-8")
+                    result = subprocess.run(
+                        [
+                            str(SMOKE_SCRIPT), "--test-plugin-maps",
+                            str(local_plugin), str(external_plugin), str(maps),
+                        ],
+                        cwd=str(REPOSITORY_ROOT),
+                        env={
+                            "PATH": "/usr/bin:/bin",
+                            "LANG": "C.UTF-8",
+                            "LC_ALL": "C.UTF-8",
+                        },
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=3.0,
+                        check=False,
+                    )
+                    self.assertEqual(
+                        expected_status,
+                        result.returncode,
+                        "stdout={!r} stderr={!r}".format(
+                            result.stdout, result.stderr),
+                    )
+
+    def test_smoke_render_probe_requires_local_x_capability(self):
+        source = _read(SMOKE_SCRIPT)
+        guard = 'if [[ "${1:-}" == "--test-render-capability" ]]'
+        self.assertIn(
+            guard,
+            source,
+            "offline render mode must exist before this test may execute "
+            "the smoke script",
+        )
+        self.assertLess(source.index(guard), source.index("p450_script_path="))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            socket_root = root / "x11 sockets"
+            socket_root.mkdir()
+            xauthority = root / "authority real"
+            xauthority.write_text("test cookie\n", encoding="utf-8")
+            authority_link = root / "authority link"
+            authority_link.symlink_to(xauthority)
+            display_socket, display_peer = socket.socketpair()
+            (socket_root / "X91").symlink_to(
+                "/proc/self/fd/%d" % display_socket.fileno())
+            try:
+                cases = (
+                    (":91.0", authority_link, 0),
+                    ("remote.example:0", authority_link, 64),
+                    (":91", root / "missing authority", 66),
+                    (":92", authority_link, 69),
+                )
+                for display, authority, expected_status in cases:
+                    with self.subTest(display=display, authority=authority):
+                        result = subprocess.run(
+                            [
+                                str(SMOKE_SCRIPT),
+                                "--test-render-capability",
+                                display,
+                                str(authority),
+                                str(socket_root),
+                            ],
+                            cwd=str(REPOSITORY_ROOT),
+                            env={
+                                "PATH": "/usr/bin:/bin",
+                                "LANG": "C.UTF-8",
+                                "LC_ALL": "C.UTF-8",
+                            },
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            timeout=3.0,
+                            check=False,
+                            pass_fds=(display_socket.fileno(),),
+                        )
+                        self.assertEqual(
+                            expected_status,
+                            result.returncode,
+                            "stdout={!r} stderr={!r}".format(
+                                result.stdout, result.stderr),
+                        )
+                        if expected_status == 0:
+                            self.assertEqual(
+                                "DISPLAY=:91.0\nXAUTHORITY=%s\n" %
+                                xauthority.resolve(),
+                                result.stdout,
+                            )
+            finally:
+                display_socket.close()
+                display_peer.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

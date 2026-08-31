@@ -2,6 +2,7 @@
 """Validate the explicit read-only PX4 runtime dependency for P450 SITL."""
 
 import argparse
+import hashlib
 import json
 import os
 import pwd
@@ -58,6 +59,18 @@ class RuntimeValidationError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class PluginOverlaySpec:
+    plugin: str
+    upstream_source: str
+    upstream_source_sha256: str
+    patched_source_sha256: str
+    upstream_header: str
+    upstream_header_sha256: str
+    generated_header: str
+    generated_header_sha256: str
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     schema_version: int
     ros_distribution: str
@@ -77,6 +90,20 @@ class RuntimeConfig:
     plugins: tuple
     support_libraries: tuple
     local_model_roots: tuple
+    local_plugin_root: str
+    local_plugin_specs: tuple
+    overlay_support_library: str
+    overlay_support_library_sha256: str
+    overlay_common_header: str
+    overlay_common_header_sha256: str
+
+
+@dataclass(frozen=True)
+class ResolvedPluginInput:
+    spec: PluginOverlaySpec
+    upstream_source: Path
+    upstream_header: Path
+    generated_header: Path
 
 
 @dataclass(frozen=True)
@@ -90,6 +117,15 @@ class ResolvedPx4Checkout:
     plugin_root: Path
     plugins: tuple
     support_libraries: tuple
+    overlay_plugin_inputs: tuple
+    overlay_support_library: Path
+    overlay_common_header: Path
+
+
+@dataclass(frozen=True)
+class ResolvedPluginOverlay:
+    root: Path
+    plugins: tuple
 
 
 class _DuplicateJsonKey(ValueError):
@@ -139,6 +175,12 @@ def _commit(value, location):
     return value
 
 
+def _sha256(value, location):
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise RuntimeConfigError("%s must be a lowercase SHA-256 digest" % location)
+    return value
+
+
 def _expect(value, expected, location):
     if value != expected:
         raise RuntimeConfigError("%s is not the supported value" % location)
@@ -155,8 +197,8 @@ def load_runtime_config(path):
         raise RuntimeConfigError("unable to load %s: %s" % (config_path, error))
 
     top = _closed_object(payload, ("schema_version", "ros", "px4", "gazebo"), "root")
-    if top["schema_version"] != 1:
-        raise RuntimeConfigError("schema_version must be 1")
+    if top["schema_version"] != 2:
+        raise RuntimeConfigError("schema_version must be 2")
 
     ros = _closed_object(
         top["ros"],
@@ -222,15 +264,133 @@ def load_runtime_config(path):
         if PurePosixPath(name).name != name or not name.endswith(".so"):
             raise RuntimeConfigError("plugin/library names must be .so basenames")
 
-    gazebo = _closed_object(top["gazebo"], ("local_model_roots",), "gazebo")
+    gazebo = _closed_object(
+        top["gazebo"],
+        ("local_model_roots", "local_plugin_overlay"),
+        "gazebo",
+    )
     local_model_roots = _tuple_of_strings(
         gazebo["local_model_roots"], "gazebo.local_model_roots")
     for index, value in enumerate(local_model_roots):
         _relative_path(value, "gazebo.local_model_roots[%d]" % index)
     _expect(local_model_roots, EXPECTED_LOCAL_MODEL_ROOTS, "gazebo.local_model_roots")
 
+    overlay = _closed_object(
+        gazebo["local_plugin_overlay"],
+        (
+            "plugin_root", "support_library", "support_library_sha256",
+            "common_header", "common_header_sha256", "plugins",
+        ),
+        "gazebo.local_plugin_overlay",
+    )
+    local_plugin_root = _relative_path(
+        overlay["plugin_root"], "gazebo.local_plugin_overlay.plugin_root")
+    overlay_support_library = _relative_path(
+        overlay["support_library"],
+        "gazebo.local_plugin_overlay.support_library",
+    )
+    overlay_common_header = _relative_path(
+        overlay["common_header"],
+        "gazebo.local_plugin_overlay.common_header",
+    )
+    _expect(
+        local_plugin_root,
+        "install/p450-runtime-overlays/lib",
+        "gazebo.local_plugin_overlay.plugin_root",
+    )
+    _expect(
+        overlay_support_library,
+        "build/amovlab_sitl_default/build_gazebo/libsensor_msgs.so",
+        "gazebo.local_plugin_overlay.support_library",
+    )
+    _expect(
+        overlay_common_header,
+        "Tools/sitl_gazebo/include/common.h",
+        "gazebo.local_plugin_overlay.common_header",
+    )
+
+    raw_plugin_specs = overlay["plugins"]
+    if not isinstance(raw_plugin_specs, list) or not raw_plugin_specs:
+        raise RuntimeConfigError(
+            "gazebo.local_plugin_overlay.plugins must be a non-empty list")
+    local_plugin_specs = []
+    for index, raw_spec in enumerate(raw_plugin_specs):
+        location = "gazebo.local_plugin_overlay.plugins[%d]" % index
+        spec = _closed_object(
+            raw_spec,
+            (
+                "plugin", "upstream_source", "upstream_source_sha256",
+                "patched_source_sha256", "upstream_header",
+                "upstream_header_sha256", "generated_header",
+                "generated_header_sha256",
+            ),
+            location,
+        )
+        plugin = spec["plugin"]
+        if (not isinstance(plugin, str) or
+                PurePosixPath(plugin).name != plugin or
+                not plugin.endswith(".so")):
+            raise RuntimeConfigError(
+                "%s.plugin must be a .so basename" % location)
+        local_plugin_specs.append(PluginOverlaySpec(
+            plugin=plugin,
+            upstream_source=_relative_path(
+                spec["upstream_source"], location + ".upstream_source"),
+            upstream_source_sha256=_sha256(
+                spec["upstream_source_sha256"],
+                location + ".upstream_source_sha256",
+            ),
+            patched_source_sha256=_sha256(
+                spec["patched_source_sha256"],
+                location + ".patched_source_sha256",
+            ),
+            upstream_header=_relative_path(
+                spec["upstream_header"], location + ".upstream_header"),
+            upstream_header_sha256=_sha256(
+                spec["upstream_header_sha256"],
+                location + ".upstream_header_sha256",
+            ),
+            generated_header=_relative_path(
+                spec["generated_header"], location + ".generated_header"),
+            generated_header_sha256=_sha256(
+                spec["generated_header_sha256"],
+                location + ".generated_header_sha256",
+            ),
+        ))
+    local_plugin_specs = tuple(local_plugin_specs)
+    plugin_names = tuple(spec.plugin for spec in local_plugin_specs)
+    if len(plugin_names) != len(set(plugin_names)):
+        raise RuntimeConfigError(
+            "gazebo.local_plugin_overlay.plugins must not contain duplicates")
+    expected_plugin_inputs = (
+        (
+            "libgazebo_gps_plugin.so",
+            "Tools/sitl_gazebo/src/gazebo_gps_plugin.cpp",
+            "Tools/sitl_gazebo/include/gazebo_gps_plugin.h",
+            "build/amovlab_sitl_default/build_gazebo/SITLGps.pb.h",
+        ),
+        (
+            "libgazebo_groundtruth_plugin.so",
+            "Tools/sitl_gazebo/src/gazebo_groundtruth_plugin.cpp",
+            "Tools/sitl_gazebo/include/gazebo_groundtruth_plugin.h",
+            "build/amovlab_sitl_default/build_gazebo/Groundtruth.pb.h",
+        ),
+    )
+    actual_plugin_inputs = tuple(
+        (
+            spec.plugin, spec.upstream_source, spec.upstream_header,
+            spec.generated_header,
+        )
+        for spec in local_plugin_specs
+    )
+    _expect(
+        actual_plugin_inputs,
+        expected_plugin_inputs,
+        "gazebo.local_plugin_overlay.plugins",
+    )
+
     return RuntimeConfig(
-        schema_version=1,
+        schema_version=2,
         ros_distribution=ros["distribution"],
         ros_root=ros["root"],
         install_space=ros["install_space"],
@@ -248,6 +408,18 @@ def load_runtime_config(path):
         plugins=plugins,
         support_libraries=support_libraries,
         local_model_roots=local_model_roots,
+        local_plugin_root=local_plugin_root,
+        local_plugin_specs=local_plugin_specs,
+        overlay_support_library=overlay_support_library,
+        overlay_support_library_sha256=_sha256(
+            overlay["support_library_sha256"],
+            "gazebo.local_plugin_overlay.support_library_sha256",
+        ),
+        overlay_common_header=overlay_common_header,
+        overlay_common_header_sha256=_sha256(
+            overlay["common_header_sha256"],
+            "gazebo.local_plugin_overlay.common_header_sha256",
+        ),
     )
 
 
@@ -326,25 +498,98 @@ def _default_ldd_runner(path, environment):
     return result.stdout
 
 
+def _default_dynamic_runner(path):
+    result = subprocess.run(
+        ["/usr/bin/readelf", "-d", str(path)],
+        env=_clean_process_environment(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeValidationError(
+            "readelf failed for %s: %s" % (path, result.stdout.strip()))
+    return result.stdout
+
+
+def _default_header_runner(path):
+    result = subprocess.run(
+        ["/usr/bin/readelf", "-h", str(path)],
+        env=_clean_process_environment(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeValidationError(
+            "readelf header inspection failed for %s: %s" %
+            (path, result.stdout.strip()))
+    return result.stdout
+
+
+def _default_symbol_runner(path):
+    result = subprocess.run(
+        ["/usr/bin/readelf", "-WsW", str(path)],
+        env=_clean_process_environment(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeValidationError(
+            "readelf symbol inspection failed for %s: %s" %
+            (path, result.stdout.strip()))
+    return result.stdout
+
+
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as error:
+        raise RuntimeValidationError(
+            "unable to hash required artifact %s: %s" % (path, error))
+    return digest.hexdigest()
+
+
+def _require_sha256(path, expected, label):
+    observed = _file_sha256(path)
+    if observed != expected:
+        raise RuntimeValidationError(
+            "%s SHA-256 mismatch: expected %s, observed %s" %
+            (label, expected, observed))
+
+
 def _validate_ldd(plugin, output, plugin_root, support_libraries):
     if not isinstance(output, str):
         raise RuntimeValidationError("ldd runner returned non-text output for %s" % plugin)
-    if re.search(r"\bnot found\b", output, re.IGNORECASE):
-        raise RuntimeValidationError("unresolved library dependency for %s" % plugin)
     supported = set(support_libraries)
+    resolutions = {}
     for line in output.splitlines():
         library, separator, resolution = line.partition("=>")
         library = library.strip()
-        if not separator or library not in supported:
+        if not separator:
             continue
         resolution = re.sub(
             r"\s+\(0x[0-9a-fA-F]+\)\s*$", "", resolution).strip()
+        if resolution.lower() == "not found":
+            raise RuntimeValidationError(
+                "unresolved library dependency for %s" % plugin)
+        if library not in supported:
+            continue
         resolved = Path(resolution).resolve(strict=False)
         expected = (plugin_root / library).resolve(strict=True)
         if resolved != expected:
             raise RuntimeValidationError(
                 "%s resolved outside the pinned plugin root: %s" %
                 (library, resolved))
+        resolutions[library] = resolved
+    return resolutions
 
 
 def validate_px4_checkout(config, px4_root, repository_root, ldd_runner=None):
@@ -363,8 +608,9 @@ def validate_px4_checkout(config, px4_root, repository_root, ldd_runner=None):
             "P450_PX4_ROOT cannot contain path-list delimiters or newlines")
 
     repository = Path(repository_root).resolve(strict=False)
-    if _is_within(root, repository):
-        raise RuntimeValidationError("P450_PX4_ROOT must remain external to this repository")
+    if _is_within(root, repository) or _is_within(repository, root):
+        raise RuntimeValidationError(
+            "P450_PX4_ROOT and the SIM repository must not overlap")
 
     top_level = Path(_run_git(root, ("rev-parse", "--show-toplevel"))).resolve(strict=True)
     if top_level != root:
@@ -410,6 +656,49 @@ def validate_px4_checkout(config, px4_root, repository_root, ldd_runner=None):
     support_libraries = tuple(
         _require_path(plugin_root, name, "file")
         for name in config.support_libraries)
+    overlay_plugin_inputs = []
+    for spec in config.local_plugin_specs:
+        upstream_source = _require_path(
+            root, spec.upstream_source, "file")
+        upstream_header = _require_path(
+            root, spec.upstream_header, "file")
+        generated_header = _require_path(
+            root, spec.generated_header, "file")
+        _require_sha256(
+            upstream_source,
+            spec.upstream_source_sha256,
+            "%s overlay upstream source" % spec.plugin,
+        )
+        _require_sha256(
+            upstream_header,
+            spec.upstream_header_sha256,
+            "%s overlay upstream header" % spec.plugin,
+        )
+        _require_sha256(
+            generated_header,
+            spec.generated_header_sha256,
+            "%s overlay generated header" % spec.plugin,
+        )
+        overlay_plugin_inputs.append(ResolvedPluginInput(
+            spec=spec,
+            upstream_source=upstream_source,
+            upstream_header=upstream_header,
+            generated_header=generated_header,
+        ))
+    overlay_support_library = _require_path(
+        root, config.overlay_support_library, "file")
+    overlay_common_header = _require_path(
+        root, config.overlay_common_header, "file")
+    _require_sha256(
+        overlay_support_library,
+        config.overlay_support_library_sha256,
+        "PX4 Gazebo overlay support library",
+    )
+    _require_sha256(
+        overlay_common_header,
+        config.overlay_common_header_sha256,
+        "PX4 Gazebo overlay common header",
+    )
 
     environment = _clean_process_environment({"LD_LIBRARY_PATH": str(plugin_root)})
     runner = ldd_runner or _default_ldd_runner
@@ -432,7 +721,160 @@ def validate_px4_checkout(config, px4_root, repository_root, ldd_runner=None):
         plugin_root=plugin_root,
         plugins=plugins,
         support_libraries=support_libraries,
+        overlay_plugin_inputs=tuple(overlay_plugin_inputs),
+        overlay_support_library=overlay_support_library,
+        overlay_common_header=overlay_common_header,
     )
+
+
+def validate_runtime_plugin_overlay(
+        config, repository_root, px4_checkout, ldd_runner=None,
+        header_runner=None, dynamic_runner=None, symbol_runner=None):
+    """Validate the SIM-owned plugin override and its dynamic boundary."""
+    supplied_repository = Path(repository_root)
+    if not supplied_repository.is_absolute():
+        raise RuntimeValidationError("repository root must be absolute")
+    try:
+        repository = supplied_repository.resolve(strict=True)
+    except OSError as error:
+        raise RuntimeValidationError("repository root is unavailable: %s" % error)
+    if not repository.is_dir():
+        raise RuntimeValidationError(
+            "repository root is not a directory: %s" % repository)
+    if ":" in str(repository) or "\n" in str(repository) or "\r" in str(repository):
+        raise RuntimeValidationError(
+            "repository root cannot contain path-list delimiters or newlines")
+
+    candidate_root = repository / config.local_plugin_root
+    try:
+        root = candidate_root.resolve(strict=True)
+    except OSError as error:
+        raise RuntimeValidationError(
+            "local plugin overlay root is missing: %s (%s)" %
+            (candidate_root, error))
+    if not _is_within(root, repository) or not root.is_dir():
+        raise RuntimeValidationError(
+            "local plugin overlay root must be a directory inside SIM: %s" %
+            candidate_root)
+
+    environment = _clean_process_environment({
+        "LD_LIBRARY_PATH": "%s:%s" % (root, px4_checkout.plugin_root),
+    })
+    runner = ldd_runner or _default_ldd_runner
+    required_support = Path(config.overlay_support_library).name
+    inspect_header = header_runner or _default_header_runner
+    inspect_dynamic = dynamic_runner or _default_dynamic_runner
+    inspect_symbols = symbol_runner or _default_symbol_runner
+    plugins = []
+    for spec in config.local_plugin_specs:
+        candidate_plugin = candidate_root / spec.plugin
+        if candidate_plugin.is_symlink():
+            raise RuntimeValidationError(
+                "local plugin overlay must be a materialized file: %s" %
+                candidate_plugin)
+        try:
+            plugin = candidate_plugin.resolve(strict=True)
+        except OSError as error:
+            raise RuntimeValidationError(
+                "local plugin overlay is missing: %s (%s)" %
+                (candidate_plugin, error))
+        if not _is_within(plugin, root) or not plugin.is_file():
+            raise RuntimeValidationError(
+                "local plugin overlay must remain inside its plugin root: %s" %
+                candidate_plugin)
+
+        try:
+            ldd_output = runner(plugin, dict(environment))
+        except RuntimeValidationError:
+            raise
+        except Exception as error:
+            raise RuntimeValidationError(
+                "ldd failed for %s: %s" % (plugin, error))
+        resolutions = _validate_ldd(
+            plugin,
+            ldd_output,
+            px4_checkout.plugin_root,
+            config.support_libraries,
+        )
+        if required_support not in resolutions:
+            raise RuntimeValidationError(
+                "local plugin overlay does not dynamically resolve %s" %
+                required_support)
+        if resolutions[required_support] != px4_checkout.overlay_support_library:
+            raise RuntimeValidationError(
+                "local plugin overlay resolved the wrong %s" % required_support)
+
+        try:
+            header_output = inspect_header(plugin)
+        except RuntimeValidationError:
+            raise
+        except Exception as error:
+            raise RuntimeValidationError(
+                "readelf header inspection failed for %s: %s" %
+                (plugin, error))
+        if not isinstance(header_output, str):
+            raise RuntimeValidationError(
+                "readelf header runner returned non-text output for %s" %
+                plugin)
+        required_header_fields = (
+            r"(?m)^\s*Class:\s+ELF64\s*$",
+            r"(?m)^\s*Type:\s+DYN \(Shared object file\)\s*$",
+            r"(?m)^\s*Machine:\s+Advanced Micro Devices X86-64\s*$",
+        )
+        if any(re.search(pattern, header_output) is None
+               for pattern in required_header_fields):
+            raise RuntimeValidationError(
+                "local plugin overlay has an unsupported ELF header: %s" %
+                plugin)
+
+        try:
+            dynamic_output = inspect_dynamic(plugin)
+        except RuntimeValidationError:
+            raise
+        except Exception as error:
+            raise RuntimeValidationError(
+                "readelf failed for %s: %s" % (plugin, error))
+        if not isinstance(dynamic_output, str):
+            raise RuntimeValidationError(
+                "readelf runner returned non-text output for %s" % plugin)
+        if re.search(r"\((?:RPATH|RUNPATH)\)", dynamic_output):
+            raise RuntimeValidationError(
+                "local plugin overlay must not embed RPATH or RUNPATH: %s" %
+                plugin)
+        needed = re.findall(r"\(NEEDED\).*?\[([^\]]+)\]", dynamic_output)
+        if required_support not in needed:
+            raise RuntimeValidationError(
+                "local plugin overlay DT_NEEDED omits %s" % required_support)
+        sonames = re.findall(r"\(SONAME\).*?\[([^\]]+)\]", dynamic_output)
+        if sonames != [spec.plugin]:
+            raise RuntimeValidationError(
+                "local plugin overlay has an invalid DT_SONAME: %s" % sonames)
+
+        try:
+            symbol_output = inspect_symbols(plugin)
+        except RuntimeValidationError:
+            raise
+        except Exception as error:
+            raise RuntimeValidationError(
+                "readelf symbol inspection failed for %s: %s" %
+                (plugin, error))
+        if not isinstance(symbol_output, str):
+            raise RuntimeValidationError(
+                "readelf symbol runner returned non-text output for %s" % plugin)
+        if re.search(
+                r"(?m)^\s*\d+:\s+[0-9a-fA-F]+\s+\d+\s+FUNC\s+"
+                r"(?:GLOBAL|WEAK)\s+\S+\s+(?!UND\b)\S+\s+"
+                r"RegisterPlugin\s*$",
+                symbol_output) is None:
+            raise RuntimeValidationError(
+                "local plugin overlay does not export RegisterPlugin")
+        if ("gazebo::physics::World::Reset()" in symbol_output or
+                "_ZN6gazebo7physics5World5ResetEv" in symbol_output):
+            raise RuntimeValidationError(
+                "local plugin overlay still references World::Reset()")
+        plugins.append(plugin)
+
+    return ResolvedPluginOverlay(root=root, plugins=tuple(plugins))
 
 
 def _parse_arguments(argv):
@@ -440,6 +882,11 @@ def _parse_arguments(argv):
     parser.add_argument("--config", required=True)
     parser.add_argument("--px4-root", required=True)
     parser.add_argument("--repository-root", required=True)
+    parser.add_argument(
+        "--external-only",
+        action="store_true",
+        help="validate only the read-only PX4 checkout before building overlays",
+    )
     return parser.parse_args(argv)
 
 
@@ -449,6 +896,9 @@ def main(argv=None):
         config = load_runtime_config(arguments.config)
         resolved = validate_px4_checkout(
             config, arguments.px4_root, arguments.repository_root)
+        if not arguments.external_only:
+            validate_runtime_plugin_overlay(
+                config, arguments.repository_root, resolved)
     except (RuntimeConfigError, RuntimeValidationError) as error:
         print("P450 runtime validation failed: %s" % error, file=sys.stderr)
         return 65

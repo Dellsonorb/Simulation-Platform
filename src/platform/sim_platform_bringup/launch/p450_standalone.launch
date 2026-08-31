@@ -1,0 +1,28 @@
+<launch>
+  <arg name="gui" default="true"/>
+  <arg name="use_sim_time" default="true"/>
+  <arg
+    name="world"
+    default="$(find prometheus_gazebo)/gazebo_worlds/prometheus_empty.world"/>
+
+  <arg name="uav1_init_x" default="0.0"/>
+  <arg name="uav1_init_y" default="0.0"/>
+  <arg name="uav1_init_z" default="0.15"/>
+  <arg name="uav1_init_yaw" default="0.0"/>
+  <arg name="px4_workdir" default="sitl_amov_0"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(arg world)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+  </include>
+
+  <include file="$(find sim_platform_bringup)/launch/p450_runtime.launch">
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+    <arg name="uav1_init_x" value="$(arg uav1_init_x)"/>
+    <arg name="uav1_init_y" value="$(arg uav1_init_y)"/>
+    <arg name="uav1_init_z" value="$(arg uav1_init_z)"/>
+    <arg name="uav1_init_yaw" value="$(arg uav1_init_yaw)"/>
+    <arg name="px4_workdir" value="$(arg px4_workdir)"/>
+  </include>
+</launch>

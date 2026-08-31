@@ -134,138 +134,9 @@ void RealSensePlugin::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf)
   // Store a pointer to the world
   this->world = this->rsModel->GetWorld();
 
-  // Sensors Manager
-  sensors::SensorManager *smanager = sensors::SensorManager::Instance();
-
-  // 获取所有传感器
-  const auto &sensors = smanager->GetSensors();
-
-  bool color = false;
-  // Get Cameras Renderers
-  // 在d435i的sdf文件中加载过程中color_camera传感器需要再depth_camera传感器之前加载
-  // 因为depth_camera传感器默认名字一致，无法做出有效判断，所有可以通过判断color_camera之后的下一个depth_camer即为正确的depth_camera
-  for (int i = 0; i < sensors.size(); ++i)
-  {
-    const auto &sensor = sensors[i];
-    if (sensor->Name() == prefix + DEPTH_CAMERA_NAME)
-    {
-      if(color)
-      {
-        this->depthCam = std::dynamic_pointer_cast<sensors::DepthCameraSensor>(sensor)->DepthCamera();
-        color = false;
-      }
-    }
-    else if (sensor->Name() == prefix + IRED1_CAMERA_NAME)
-    {
-      std::string name = std::dynamic_pointer_cast<sensors::CameraSensor>(sensor)->Camera()->Name();
-      if(name.find(_model->GetName()) != std::string::npos)
-      {
-        this->ired1Cam = std::dynamic_pointer_cast<sensors::CameraSensor>(sensor)->Camera();
-      }
-    }
-    else if (sensor->Name() == prefix + IRED2_CAMERA_NAME)
-    {
-      std::string name = std::dynamic_pointer_cast<sensors::CameraSensor>(sensor)->Camera()->Name();
-      if(name.find(_model->GetName()) != std::string::npos)
-      {
-        this->ired2Cam = std::dynamic_pointer_cast<sensors::CameraSensor>(sensor)->Camera();
-      }
-    }
-    else if (sensor->Name() == prefix + COLOR_CAMERA_NAME)
-    {
-      std::string name = std::dynamic_pointer_cast<sensors::CameraSensor>(sensor)->Camera()->Name();
-      if(name.find(_model->GetName()) != std::string::npos)
-      {
-        this->colorCam = std::dynamic_pointer_cast<sensors::CameraSensor>(sensor)->Camera();
-        color = true;
-      }
-    }
-  }
-  // 原先赋值方式
-  // this->depthCam = std::dynamic_pointer_cast<sensors::DepthCameraSensor>(
-  //                      smanager->GetSensor(prefix + DEPTH_CAMERA_NAME))
-  //                      ->DepthCamera();
-
-  // this->ired1Cam = std::dynamic_pointer_cast<sensors::CameraSensor>(
-  //                      smanager->GetSensor(prefix + IRED1_CAMERA_NAME))
-  //                      ->Camera();
-  // this->ired2Cam = std::dynamic_pointer_cast<sensors::CameraSensor>(
-  //                      smanager->GetSensor(prefix + IRED2_CAMERA_NAME))
-  //                      ->Camera();
-  // this->colorCam = std::dynamic_pointer_cast<sensors::CameraSensor>(
-  //                      smanager->GetSensor(prefix + COLOR_CAMERA_NAME))
-  //                      ->Camera();
-
-  // Check if camera renderers have been found successfuly
-  if (!this->depthCam)
-  {
-    std::cerr << "RealSensePlugin: Depth Camera has not been found"
-              << std::endl;
-    return;
-  }
-  if (!this->ired1Cam)
-  {
-    std::cerr << "RealSensePlugin: InfraRed Camera 1 has not been found"
-              << std::endl;
-    return;
-  }
-  if (!this->ired2Cam)
-  {
-    std::cerr << "RealSensePlugin: InfraRed Camera 2 has not been found"
-              << std::endl;
-    return;
-  }
-  if (!this->colorCam)
-  {
-    std::cerr << "RealSensePlugin: Color Camera has not been found"
-              << std::endl;
-    return;
-  }
-
-  // Resize Depth Map dimensions
-  try
-  {
-    this->depthMap.resize(this->depthCam->ImageWidth() *
-                          this->depthCam->ImageHeight());
-  }
-  catch (std::bad_alloc &e)
-  {
-    std::cerr << "RealSensePlugin: depthMap allocation failed: " << e.what()
-              << std::endl;
-    return;
-  }
-
-  // Setup Transport Node
-  this->transportNode = transport::NodePtr(new transport::Node());
-  this->transportNode->Init(this->world->Name());
-
-  // Setup Publishers
-  std::string rsTopicRoot = "~/" + this->rsModel->GetName();
-
-  this->depthPub = this->transportNode->Advertise<msgs::ImageStamped>(
-      rsTopicRoot + DEPTH_CAMERA_TOPIC, 1, depthUpdateRate_);
-  this->ired1Pub = this->transportNode->Advertise<msgs::ImageStamped>(
-      rsTopicRoot + IRED1_CAMERA_TOPIC, 1, infraredUpdateRate_);
-  this->ired2Pub = this->transportNode->Advertise<msgs::ImageStamped>(
-      rsTopicRoot + IRED2_CAMERA_TOPIC, 1, infraredUpdateRate_);
-  this->colorPub = this->transportNode->Advertise<msgs::ImageStamped>(
-      rsTopicRoot + COLOR_CAMERA_TOPIC, 1, colorUpdateRate_);
-
-  // Listen to depth camera new frame event
-
-  this->newDepthFrameConn = this->depthCam->ConnectNewDepthFrame(
-      std::bind(&RealSensePlugin::OnNewDepthFrame, this));
-
-  this->newIred1FrameConn = this->ired1Cam->ConnectNewImageFrame(std::bind(
-      &RealSensePlugin::OnNewFrame, this, this->ired1Cam, this->ired1Pub));
-
-  this->newIred2FrameConn = this->ired2Cam->ConnectNewImageFrame(std::bind(
-      &RealSensePlugin::OnNewFrame, this, this->ired2Cam, this->ired2Pub));
-
-  this->newColorFrameConn = this->colorCam->ConnectNewImageFrame(std::bind(
-      &RealSensePlugin::OnNewFrame, this, this->colorCam, this->colorPub));
-
-  // Listen to the update event
+  // Dynamically inserted camera sensors may exist before their rendering
+  // cameras are initialized. Bind them from a later world update instead of
+  // blocking the model-loading thread or dereferencing an empty renderer.
   this->updateConnection = event::Events::ConnectWorldUpdateBegin(
       boost::bind(&RealSensePlugin::OnUpdate, this));
 }
@@ -340,4 +211,98 @@ void RealSensePlugin::OnNewDepthFrame()
 }
 
 /////////////////////////////////////////////////
-void RealSensePlugin::OnUpdate() {}
+void RealSensePlugin::OnUpdate()
+{
+  sensors::SensorManager *smanager = sensors::SensorManager::Instance();
+  const auto sensorList = smanager->GetSensors();
+
+  rendering::DepthCameraPtr depthCandidate;
+  rendering::CameraPtr colorCandidate;
+  rendering::CameraPtr ired1Candidate;
+  rendering::CameraPtr ired2Candidate;
+  const std::string modelScope = "::" + this->rsModel->GetName() + "::";
+
+  for (const auto &sensor : sensorList)
+  {
+    if (!sensor || sensor->ScopedName().find(modelScope) == std::string::npos)
+      continue;
+
+    const std::string sensorName = sensor->Name();
+    if (sensorName == this->prefix + DEPTH_CAMERA_NAME)
+    {
+      const auto depthSensor =
+          std::dynamic_pointer_cast<sensors::DepthCameraSensor>(sensor);
+      if (!depthSensor)
+        continue;
+      depthCandidate = depthSensor->DepthCamera();
+      continue;
+    }
+
+    if (sensorName != this->prefix + COLOR_CAMERA_NAME &&
+        sensorName != this->prefix + IRED1_CAMERA_NAME &&
+        sensorName != this->prefix + IRED2_CAMERA_NAME)
+      continue;
+
+    const auto cameraSensor =
+        std::dynamic_pointer_cast<sensors::CameraSensor>(sensor);
+    if (!cameraSensor)
+      continue;
+    const auto cameraCandidate = cameraSensor->Camera();
+    if (!cameraCandidate)
+      continue;
+
+    if (sensorName == this->prefix + COLOR_CAMERA_NAME)
+      colorCandidate = cameraCandidate;
+    else if (sensorName == this->prefix + IRED1_CAMERA_NAME)
+      ired1Candidate = cameraCandidate;
+    else
+      ired2Candidate = cameraCandidate;
+  }
+
+  if (!depthCandidate || !colorCandidate || !ired1Candidate || !ired2Candidate)
+    return;
+
+  this->depthCam = depthCandidate;
+  this->colorCam = colorCandidate;
+  this->ired1Cam = ired1Candidate;
+  this->ired2Cam = ired2Candidate;
+
+  try
+  {
+    this->depthMap.resize(this->depthCam->ImageWidth() *
+                          this->depthCam->ImageHeight());
+  }
+  catch (std::bad_alloc &e)
+  {
+    std::cerr << "RealSensePlugin: depthMap allocation failed: " << e.what()
+              << std::endl;
+    this->updateConnection.reset();
+    return;
+  }
+
+  this->transportNode = transport::NodePtr(new transport::Node());
+  this->transportNode->Init(this->world->Name());
+
+  const std::string rsTopicRoot = "~/" + this->rsModel->GetName();
+  this->depthPub = this->transportNode->Advertise<msgs::ImageStamped>(
+      rsTopicRoot + DEPTH_CAMERA_TOPIC, 1, depthUpdateRate_);
+  this->ired1Pub = this->transportNode->Advertise<msgs::ImageStamped>(
+      rsTopicRoot + IRED1_CAMERA_TOPIC, 1, infraredUpdateRate_);
+  this->ired2Pub = this->transportNode->Advertise<msgs::ImageStamped>(
+      rsTopicRoot + IRED2_CAMERA_TOPIC, 1, infraredUpdateRate_);
+  this->colorPub = this->transportNode->Advertise<msgs::ImageStamped>(
+      rsTopicRoot + COLOR_CAMERA_TOPIC, 1, colorUpdateRate_);
+
+  this->newDepthFrameConn = this->depthCam->ConnectNewDepthFrame(
+      std::bind(&RealSensePlugin::OnNewDepthFrame, this));
+  this->newIred1FrameConn = this->ired1Cam->ConnectNewImageFrame(std::bind(
+      &RealSensePlugin::OnNewFrame, this, this->ired1Cam, this->ired1Pub));
+  this->newIred2FrameConn = this->ired2Cam->ConnectNewImageFrame(std::bind(
+      &RealSensePlugin::OnNewFrame, this, this->ired2Cam, this->ired2Pub));
+  this->newColorFrameConn = this->colorCam->ConnectNewImageFrame(std::bind(
+      &RealSensePlugin::OnNewFrame, this, this->colorCam, this->colorPub));
+
+  std::cout << "RealSensePlugin: Camera renderers are ready for model "
+            << this->rsModel->GetName() << std::endl;
+  this->updateConnection.reset();
+}

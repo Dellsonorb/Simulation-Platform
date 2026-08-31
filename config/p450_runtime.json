@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "ros": {
     "distribution": "noetic",
     "root": "/opt/ros/noetic",
@@ -55,6 +55,35 @@
       "gazebo_models/scene_models",
       "gazebo_models/r200_models",
       "gazebo_models/texture"
-    ]
+    ],
+    "local_plugin_overlay": {
+      "plugin_root": "install/p450-runtime-overlays/lib",
+      "support_library": "build/amovlab_sitl_default/build_gazebo/libsensor_msgs.so",
+      "support_library_sha256": "203679a0bca52a1839a108ea3c66ab431004ee13a4f1e6b78775d549c74d6ce5",
+      "common_header": "Tools/sitl_gazebo/include/common.h",
+      "common_header_sha256": "329133e49171793664184dd9c60f4f24305e280600d9a274286ca5ec2eb84241",
+      "plugins": [
+        {
+          "plugin": "libgazebo_gps_plugin.so",
+          "upstream_source": "Tools/sitl_gazebo/src/gazebo_gps_plugin.cpp",
+          "upstream_source_sha256": "128a20dc01e140ebba7e7c889cce5c729aa1a013bcafd3b272ea0360f7a42c75",
+          "patched_source_sha256": "dc66bf5b1d19e350edcff2bcdd533c659f5836360a5f71562de41a4001ff304c",
+          "upstream_header": "Tools/sitl_gazebo/include/gazebo_gps_plugin.h",
+          "upstream_header_sha256": "fcaa736262d89575a6084e659500cb8889d6a927c91f1c044eab5587e74f357f",
+          "generated_header": "build/amovlab_sitl_default/build_gazebo/SITLGps.pb.h",
+          "generated_header_sha256": "537727dde21637fcd8cf630da2c49f8d7004f868638c23b05939b17a5908a434"
+        },
+        {
+          "plugin": "libgazebo_groundtruth_plugin.so",
+          "upstream_source": "Tools/sitl_gazebo/src/gazebo_groundtruth_plugin.cpp",
+          "upstream_source_sha256": "8dd9d6bd2c7619f38fa0104b730c8bf5653243d80762bf26ade0eec4b94266a3",
+          "patched_source_sha256": "7e1caae1e01dafbacd2b1e3ffb80efdfe36ace0c6b06cbeefd261d9c85d8aa97",
+          "upstream_header": "Tools/sitl_gazebo/include/gazebo_groundtruth_plugin.h",
+          "upstream_header_sha256": "aabc2cee0d9ee378aa25f9b7d62d5d7239682c129c115e97cc56f4577f39761f",
+          "generated_header": "build/amovlab_sitl_default/build_gazebo/Groundtruth.pb.h",
+          "generated_header_sha256": "80229d01b44dbe7bd07b36f3c24dc2bfdb5156c23fd9a573d2ce73514e1e374b"
+        }
+      ]
+    }
   }
 }
