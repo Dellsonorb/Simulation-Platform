@@ -1132,6 +1132,7 @@ class NoeticEnvironmentWrapperContractTest(unittest.TestCase):
             "XDG_CONFIG_HOME": str(ROOT / "logs/xdg/config"),
             "XDG_CACHE_HOME": str(ROOT / "logs/xdg/cache"),
             "CMAKE_PREFIX_PATH": "/opt/ros/noetic",
+            "ROS_MASTER_URI": "http://localhost:11311",
             "ROS_PACKAGE_PATH": "/opt/ros/noetic/share",
             "ROS_DISTRO": "noetic",
         }
@@ -1157,7 +1158,6 @@ class NoeticEnvironmentWrapperContractTest(unittest.TestCase):
             "PYTHONHOME",
             "ROS_HOSTNAME",
             "ROS_IP",
-            "ROS_MASTER_URI",
             "VIRTUAL_ENV",
         ):
             with self.subTest(scrubbed=name):
