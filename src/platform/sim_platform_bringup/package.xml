@@ -11,6 +11,7 @@
 
   <exec_depend>gazebo_plugins</exec_depend>
   <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>livox_laser_gazebo_plugins</exec_depend>
   <exec_depend>mavros</exec_depend>
   <exec_depend>prometheus_gazebo</exec_depend>
   <exec_depend>prometheus_uav_control</exec_depend>
@@ -20,5 +21,6 @@
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>realsense_ros_gazebo</exec_depend>
   <exec_depend>roslaunch</exec_depend>
+  <exec_depend>sim_platform_assets</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
 </package>

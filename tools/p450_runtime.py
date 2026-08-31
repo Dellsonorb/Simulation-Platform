@@ -19,6 +19,8 @@ EXPECTED_REQUIRED_PACKAGES = (
     "prometheus_gazebo",
     "prometheus_uav_control",
     "brick_aerial_perception",
+    "sim_platform_assets",
+    "livox_laser_gazebo_plugins",
 )
 EXPECTED_MODEL_FILES = (
     "Tools/sitl_gazebo/models/gps/model.config",

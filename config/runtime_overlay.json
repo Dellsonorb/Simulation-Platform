@@ -67,6 +67,7 @@
     "src/p450/livox_laser_gazebo_plugins/package.xml": "884bcd9effd4173b1aab47e67762610ddae905d414a891237cffa63373febcdd",
     "src/p450/livox_laser_gazebo_plugins/src/livox_points_plugin.cpp": "915bd2e28d0d1aa01a54900ccfb19b2c6e6bdf7d1251c3f993ba11c1ce925671",
     "src/p450/prometheus_gazebo/CMakeLists.txt": "1f2ef6c0eeb81fd65fee45dae303b19020d229c5a3031ef33f9512d84d30d1d8",
+    "src/p450/prometheus_gazebo/gazebo_models/uav_models/p450_D435i_mid360/p450_D435i_mid360.sdf.jinja": "d3abdb97d26dc1c711080082d9b6d6a0f69c42c44984504fc80023cca1c0b79a",
     "src/p450/prometheus_gazebo/package.xml": "57ce403c0187ea73075ef83ef9465a69608a8959046c8671b0c103830ba270fd",
     "src/p450/prometheus_gazebo/test/test_p450_sensor_profiles.py": "465db98c2aa1c9878d261cbc75bb215f3dcbe89ddf712631913ca5240df36020",
     "src/p450/prometheus_msgs/CMakeLists.txt": "bf24e658dd1c6386442fadf45e2dd01f026467eb2eb53f5a8abb32a67e50130c",

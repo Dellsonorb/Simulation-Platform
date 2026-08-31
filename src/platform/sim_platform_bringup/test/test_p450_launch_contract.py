@@ -22,12 +22,22 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 RUNTIME_LAUNCH = PACKAGE_ROOT / "launch" / "p450_runtime.launch"
 STANDALONE_LAUNCH = PACKAGE_ROOT / "launch" / "p450_standalone.launch"
 TF_CONTRACT = PACKAGE_ROOT / "config" / "p450_tf_contract.yaml"
+MID360_TF_CONTRACT = PACKAGE_ROOT / "config" / "p450_mid360_tf_contract.yaml"
 SMOKE_SCRIPT = REPOSITORY_ROOT / "scripts" / "smoke_p450_standalone.bash"
+SENSOR_TF_OFFSETS = (
+    REPOSITORY_ROOT
+    / "src/p450/prometheus_uav_control/launch/sensor_tf_offset.yaml"
+)
 
 JINJA_MODEL = (
     REPOSITORY_ROOT
     / "src/p450/prometheus_gazebo/gazebo_models/uav_models"
     / "p450_D435i/p450_D435i.sdf.jinja"
+)
+MID360_JINJA_MODEL = (
+    REPOSITORY_ROOT
+    / "src/p450/prometheus_gazebo/gazebo_models/uav_models"
+    / "p450_D435i_mid360/p450_D435i_mid360.sdf.jinja"
 )
 D435_MODEL = (
     REPOSITORY_ROOT
@@ -67,6 +77,20 @@ EXPECTED_CONTROLLER_QUATERNION = (
     0.5794173382492647,
     -0.4053092006556687,
     0.4053092006556688,
+)
+EXPECTED_LIDAR_MOUNT = (0.13, 0.0, 0.23, 0.0, 0.35, 0.0)
+EXPECTED_LIDAR_SENSOR_LOCAL = (0.0, 0.0, 0.05, 0.0, 0.0, 0.0)
+EXPECTED_LIDAR_TRANSLATION = (
+    0.14714489037277257,
+    0.0,
+    0.27696863564236896,
+)
+EXPECTED_LIDAR_RPY = (0.0, 0.35, 0.0)
+EXPECTED_LIDAR_QUATERNION = (
+    0.0,
+    math.sin(0.175),
+    0.0,
+    math.cos(0.175),
 )
 EXPECTED_STATIC_TRANSFORMS = {
     "uav1/camera_depth_frame": (
@@ -160,7 +184,7 @@ class ArtifactMaterializationTest(unittest.TestCase):
         missing = [
             str(path.relative_to(REPOSITORY_ROOT))
             for path in (RUNTIME_LAUNCH, STANDALONE_LAUNCH, TF_CONTRACT,
-                         SMOKE_SCRIPT)
+                         MID360_TF_CONTRACT, SMOKE_SCRIPT)
             if not path.is_file()
         ]
         self.assertEqual([], missing)
@@ -190,6 +214,7 @@ class RuntimeLaunchContractTest(unittest.TestCase):
             "uav1_init_z": "0.15",
             "uav1_init_yaw": "0.0",
             "px4_workdir": "sitl_amov_0",
+            "enable_mid360": "false",
         }, arguments)
         use_sim_time = _one(
             [param for param in self.root.findall("./param")
@@ -204,10 +229,21 @@ class RuntimeLaunchContractTest(unittest.TestCase):
 
     def test_model_is_rendered_and_spawned_exactly_once(self):
         group = _one(self.root.findall("./group"), "uav1 group")
-        sdf_parameter = _one(
-            [param for param in group.findall("./param")
-             if param.get("name") == "sdf_p450_D435i_0"],
-            "rendered P450 SDF parameter")
+        sdf_parameters = [
+            param for param in group.findall("./param")
+            if param.get("name") == "sdf_p450_D435i_0"
+        ]
+        self.assertEqual(2, len(sdf_parameters))
+        default_parameter = _one(
+            [param for param in sdf_parameters
+             if param.get("unless") == "$(arg enable_mid360)"],
+            "default rendered P450 SDF parameter")
+        mid360_parameter = _one(
+            [param for param in sdf_parameters
+             if param.get("if") == "$(arg enable_mid360)"],
+            "MID360 rendered P450 SDF parameter")
+        self.assertIsNone(default_parameter.get("if"))
+        self.assertIsNone(mid360_parameter.get("unless"))
         self.assertEqual(
             "/usr/bin/python3 "
             "$(find prometheus_gazebo)/scripts/jinja_gen.py --stdout "
@@ -216,7 +252,17 @@ class RuntimeLaunchContractTest(unittest.TestCase):
             "$(find prometheus_gazebo)/gazebo_models/uav_models/"
             "p450_D435i/p450_D435i.sdf.jinja "
             "$(find prometheus_gazebo)",
-            sdf_parameter.get("command"),
+            default_parameter.get("command"),
+        )
+        self.assertEqual(
+            "/usr/bin/python3 "
+            "$(find prometheus_gazebo)/scripts/jinja_gen.py --stdout "
+            "--mavlink_id=1 --mavlink_udp_port=14560 "
+            "--mavlink_tcp_port=4560 "
+            "$(find prometheus_gazebo)/gazebo_models/uav_models/"
+            "p450_D435i_mid360/p450_D435i_mid360.sdf.jinja "
+            "$(find prometheus_gazebo)",
+            mid360_parameter.get("command"),
         )
 
         spawns = _nodes(self.root, "gazebo_ros", "spawn_model")
@@ -228,6 +274,15 @@ class RuntimeLaunchContractTest(unittest.TestCase):
             "-z $(arg uav1_init_z) -Y $(arg uav1_init_yaw)",
             spawn.get("args"),
         )
+
+        default_model = _read(JINJA_MODEL)
+        mid360_model = _read(MID360_JINJA_MODEL)
+        self.assertNotIn("liblivox_laser_gazebo_plugins.so", default_model)
+        self.assertEqual(1, mid360_model.count("model://D435i"))
+        self.assertEqual(
+            1, mid360_model.count("librealsense_gazebo_plugin.so"))
+        self.assertEqual(
+            1, mid360_model.count("liblivox_laser_gazebo_plugins.so"))
 
     def test_px4_uses_only_the_platform_wrapper(self):
         px4 = _one(
@@ -318,6 +373,39 @@ class RuntimeLaunchContractTest(unittest.TestCase):
         for name in expected_values:
             self.assertGreater(children.index(parameters[name]), last_load_index)
 
+        lidar_parameters = {
+            parameter.get("name"): parameter
+            for parameter in controller.findall("./param")
+            if parameter.get("name", "").startswith("Lidar/offset_")
+        }
+        expected_lidar_values = {
+            "Lidar/offset_x": "0.14714489037277257",
+            "Lidar/offset_y": "0.0",
+            "Lidar/offset_z": "0.27696863564236896",
+            "Lidar/offset_roll": "0.0",
+            "Lidar/offset_pitch": "0.35",
+            "Lidar/offset_yaw": "0.0",
+        }
+        self.assertEqual(set(expected_lidar_values), set(lidar_parameters))
+        for name, expected in expected_lidar_values.items():
+            parameter = lidar_parameters[name]
+            self.assertEqual(expected, parameter.get("value"), name)
+            self.assertEqual("double", parameter.get("type"), name)
+            self.assertEqual("$(arg enable_mid360)", parameter.get("if"), name)
+            self.assertIsNone(parameter.get("unless"), name)
+            self.assertGreater(children.index(parameter), last_load_index)
+        self.assertNotIn("sensor_tf_offset_mid360.yaml", self.source)
+
+        inherited_offsets = _yaml(SENSOR_TF_OFFSETS)
+        self.assertEqual({
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+            "offset_z": 0.0,
+            "offset_roll": 0.0,
+            "offset_pitch": 0.0,
+            "offset_yaw": 0.0,
+        }, inherited_offsets["Lidar"])
+
     def test_controller_disables_startup_px4_parameter_mutation(self):
         controller = _one(
             _nodes(self.root, "prometheus_uav_control", "uav_control_main"),
@@ -350,6 +438,7 @@ class RuntimeLaunchContractTest(unittest.TestCase):
             self.assertNotIn(child, actual)
             actual[child] = (parent, translation, rotation)
         self.assertEqual(set(EXPECTED_STATIC_TRANSFORMS), set(actual))
+        self.assertNotIn("uav1/lidar_link", actual)
         for child, expected in EXPECTED_STATIC_TRANSFORMS.items():
             self.assertEqual(expected[0], actual[child][0])
             _assert_float_tuple(self, actual[child][1], expected[1])
@@ -374,6 +463,7 @@ class StandaloneLaunchContractTest(unittest.TestCase):
             "uav1_init_z": "0.15",
             "uav1_init_yaw": "0.0",
             "px4_workdir": "sitl_amov_0",
+            "enable_mid360": "false",
         }, arguments)
         includes = self.root.findall("./include")
         self.assertEqual([
@@ -397,7 +487,77 @@ class StandaloneLaunchContractTest(unittest.TestCase):
             "uav1_init_z": "$(arg uav1_init_z)",
             "uav1_init_yaw": "$(arg uav1_init_yaw)",
             "px4_workdir": "$(arg px4_workdir)",
+            "enable_mid360": "$(arg enable_mid360)",
         }, runtime_args)
+
+
+class Mid360TfContractTest(unittest.TestCase):
+    def setUp(self):
+        self.contract = _yaml(MID360_TF_CONTRACT)
+
+    def test_contract_freezes_model_composite_authority_and_message(self):
+        self.assertEqual({
+            "schema_version", "profile", "frame_normalization", "model",
+            "composite", "topic",
+        }, set(self.contract))
+        self.assertEqual(1, self.contract["schema_version"])
+        self.assertEqual("p450_D435i_mid360", self.contract["profile"])
+        self.assertEqual("strip_leading_slash",
+                         self.contract["frame_normalization"])
+        model = self.contract["model"]
+        self.assertEqual({"mount", "ray_sensor"}, set(model))
+        _assert_float_tuple(
+            self, tuple(model["mount"]["translation_m"]),
+            EXPECTED_LIDAR_MOUNT[:3])
+        _assert_float_tuple(
+            self, tuple(model["mount"]["rpy_rad"]),
+            EXPECTED_LIDAR_MOUNT[3:])
+        _assert_float_tuple(
+            self, tuple(model["ray_sensor"]["translation_m"]),
+            EXPECTED_LIDAR_SENSOR_LOCAL[:3])
+        _assert_float_tuple(
+            self, tuple(model["ray_sensor"]["rpy_rad"]),
+            EXPECTED_LIDAR_SENSOR_LOCAL[3:])
+
+        composite = self.contract["composite"]
+        self.assertEqual("uav1/base_link", composite["parent"])
+        self.assertEqual("uav1/lidar_link", composite["child"])
+        self.assertEqual("/uav_control_main_1", composite["authority"])
+        _assert_float_tuple(
+            self, tuple(composite["translation_m"]),
+            EXPECTED_LIDAR_TRANSLATION)
+        _assert_float_tuple(
+            self, tuple(composite["rpy_rad"]), EXPECTED_LIDAR_RPY)
+        _assert_float_tuple(
+            self, tuple(composite["rotation_xyzw"]),
+            EXPECTED_LIDAR_QUATERNION)
+        self.assertEqual({
+            "name": "/uav1/livox/lidar",
+            "type": "prometheus_msgs/LivoxCustomMsg",
+        }, self.contract["topic"])
+
+    def test_composite_is_derived_from_mount_and_ray_sensor(self):
+        model = self.contract["model"]
+        mount_t = tuple(model["mount"]["translation_m"])
+        mount_rpy = tuple(model["mount"]["rpy_rad"])
+        sensor_t = tuple(model["ray_sensor"]["translation_m"])
+        sensor_rpy = tuple(model["ray_sensor"]["rpy_rad"])
+        pitch = mount_rpy[1]
+        derived_translation = (
+            mount_t[0] + math.sin(pitch) * sensor_t[2],
+            mount_t[1] + sensor_t[1],
+            mount_t[2] + math.cos(pitch) * sensor_t[2],
+        )
+        derived_rpy = tuple(
+            mount_rpy[index] + sensor_rpy[index] for index in range(3))
+        composite = self.contract["composite"]
+        _assert_float_tuple(
+            self, derived_translation, tuple(composite["translation_m"]))
+        _assert_float_tuple(
+            self, derived_rpy, tuple(composite["rpy_rad"]))
+        _assert_float_tuple(
+            self, _quaternion_from_rpy(*derived_rpy),
+            tuple(composite["rotation_xyzw"]))
 
 
 class TfContractTest(unittest.TestCase):
@@ -556,6 +716,50 @@ class ImportedSensorEvidenceTest(unittest.TestCase):
         for token in forbidden:
             self.assertNotIn(token, active)
 
+    def test_mid360_jinja_freezes_mount_ray_and_message_contract(self):
+        root = ET.fromstring(_read(MID360_JINJA_MODEL))
+        model = root.find("./model")
+        self.assertIsNotNone(model)
+        livox = _one(
+            [link for link in model.findall("./link")
+             if link.get("name") == "livox_base"], "Livox mount link")
+        _assert_float_tuple(
+            self, _floats(livox.findtext("pose").split()),
+            EXPECTED_LIDAR_MOUNT)
+        ray = _one(
+            [sensor for sensor in livox.findall("./sensor")
+             if sensor.get("name") == "laser_livox"], "Livox ray sensor")
+        self.assertEqual("ray", ray.get("type"))
+        _assert_float_tuple(
+            self, _floats(ray.findtext("pose").split()),
+            EXPECTED_LIDAR_SENSOR_LOCAL)
+        self.assertEqual("10", ray.findtext("update_rate"))
+        plugin = _one(
+            [item for item in ray.findall("./plugin")
+             if item.get("filename") == "liblivox_laser_gazebo_plugins.so"],
+            "Livox Gazebo plugin")
+        self.assertEqual("10000", plugin.findtext("samples"))
+        self.assertEqual("3", plugin.findtext("publish_pointcloud_type"))
+        self.assertEqual(
+            "/uav{{ mavlink_id }}/livox/lidar",
+            plugin.findtext("ros_topic"))
+        self.assertEqual(
+            "uav{{ mavlink_id }}/lidar_link",
+            plugin.findtext("frameName"))
+        joint = _one(
+            [item for item in model.findall("./joint")
+             if item.get("name") == "mid360_joint"], "MID360 mount joint")
+        self.assertEqual("fixed", joint.get("type"))
+        self.assertEqual("livox_base", joint.findtext("child"))
+        self.assertEqual("base_link", joint.findtext("parent"))
+
+    def test_active_launch_surface_excludes_mapping_and_extra_lifecycle(self):
+        active = (_read(RUNTIME_LAUNCH) + _read(STANDALONE_LAUNCH)).lower()
+        for token in (
+                "fast_lio", "octomap", "2dlidar", "2d_lidar", "mapping",
+                "benchmark", "ground_aerial", "delete_model", "respawn"):
+            self.assertNotIn(token, active)
+
 
 class PackageAndSmokeContractTest(unittest.TestCase):
     def test_smoke_uses_a_fresh_run_local_px4_workdir(self):
@@ -703,7 +907,12 @@ class PackageAndSmokeContractTest(unittest.TestCase):
             "python3-numpy",
             "python3-rospkg",
             "python3-yaml",
+            "livox_laser_gazebo_plugins",
+            "sim_platform_assets",
         }.issubset(dependencies))
+        dependency_text = "\n".join(dependencies).lower()
+        for token in ("fast_lio", "octomap", "mapping", "benchmark"):
+            self.assertNotIn(token, dependency_text)
 
     def test_smoke_script_is_isolated_bounded_and_checks_live_state(self):
         source = _read(SMOKE_SCRIPT)

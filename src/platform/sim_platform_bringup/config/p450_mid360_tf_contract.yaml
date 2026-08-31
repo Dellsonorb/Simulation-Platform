@@ -1,0 +1,23 @@
+schema_version: 1
+profile: p450_D435i_mid360
+frame_normalization: strip_leading_slash
+
+model:
+  mount:
+    translation_m: [0.13, 0.0, 0.23]
+    rpy_rad: [0.0, 0.35, 0.0]
+  ray_sensor:
+    translation_m: [0.0, 0.0, 0.05]
+    rpy_rad: [0.0, 0.0, 0.0]
+
+composite:
+  parent: uav1/base_link
+  child: uav1/lidar_link
+  authority: /uav_control_main_1
+  translation_m: [0.14714489037277257, 0.0, 0.27696863564236896]
+  rpy_rad: [0.0, 0.35, 0.0]
+  rotation_xyzw: [0.0, 0.17410813759359595, 0.0, 0.9847265389049334]
+
+topic:
+  name: /uav1/livox/lidar
+  type: prometheus_msgs/LivoxCustomMsg

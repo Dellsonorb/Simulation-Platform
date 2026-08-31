@@ -5,6 +5,7 @@
   <arg name="uav1_init_z" default="0.15"/>
   <arg name="uav1_init_yaw" default="0.0"/>
   <arg name="px4_workdir" default="sitl_amov_0"/>
+  <arg name="enable_mid360" default="false"/>
 
   <param name="/use_sim_time" type="bool" value="$(arg use_sim_time)"/>
 
@@ -13,7 +14,12 @@
   <group ns="/uav1">
     <param
       name="sdf_p450_D435i_0"
+      unless="$(arg enable_mid360)"
       command="/usr/bin/python3 $(find prometheus_gazebo)/scripts/jinja_gen.py --stdout --mavlink_id=1 --mavlink_udp_port=14560 --mavlink_tcp_port=4560 $(find prometheus_gazebo)/gazebo_models/uav_models/p450_D435i/p450_D435i.sdf.jinja $(find prometheus_gazebo)"/>
+    <param
+      name="sdf_p450_D435i_0"
+      if="$(arg enable_mid360)"
+      command="/usr/bin/python3 $(find prometheus_gazebo)/scripts/jinja_gen.py --stdout --mavlink_id=1 --mavlink_udp_port=14560 --mavlink_tcp_port=4560 $(find prometheus_gazebo)/gazebo_models/uav_models/p450_D435i_mid360/p450_D435i_mid360.sdf.jinja $(find prometheus_gazebo)"/>
 
     <node
       pkg="gazebo_ros"
@@ -100,5 +106,14 @@
     <param name="D435i/offset_roll" type="double" value="-1.9207963267948966"/>
     <param name="D435i/offset_pitch" type="double" value="0.0"/>
     <param name="D435i/offset_yaw" type="double" value="-1.5707963267948966"/>
+
+    <!-- Exact base -> MID360 ray-sensor composite. The controller remains the
+         sole authority for uav1/lidar_link when the profile is enabled. -->
+    <param if="$(arg enable_mid360)" name="Lidar/offset_x" type="double" value="0.14714489037277257"/>
+    <param if="$(arg enable_mid360)" name="Lidar/offset_y" type="double" value="0.0"/>
+    <param if="$(arg enable_mid360)" name="Lidar/offset_z" type="double" value="0.27696863564236896"/>
+    <param if="$(arg enable_mid360)" name="Lidar/offset_roll" type="double" value="0.0"/>
+    <param if="$(arg enable_mid360)" name="Lidar/offset_pitch" type="double" value="0.35"/>
+    <param if="$(arg enable_mid360)" name="Lidar/offset_yaw" type="double" value="0.0"/>
   </node>
 </launch>

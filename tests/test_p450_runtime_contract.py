@@ -120,6 +120,8 @@ EXPECTED_REQUIRED_PACKAGES = (
     "prometheus_gazebo",
     "prometheus_uav_control",
     "brick_aerial_perception",
+    "sim_platform_assets",
+    "livox_laser_gazebo_plugins",
 )
 
 
@@ -1056,6 +1058,13 @@ class RuntimeWrapperContractTest(unittest.TestCase):
             installed_package.mkdir(parents=True, exist_ok=True)
             (installed_package / "package.xml").write_text(
                 FakePx4Checkout._package_xml(name), encoding="utf-8")
+        asset_models = install_root / "share/sim_platform_assets/models"
+        asset_models.mkdir(parents=True)
+        (install_root / "lib").mkdir(parents=True)
+        shutil.copy2(
+            "/bin/true",
+            install_root / "lib/liblivox_laser_gazebo_plugins.so",
+        )
         platform_package = install_root / "share/sim_platform_bringup"
         platform_package.mkdir(parents=True, exist_ok=True)
         (platform_package / "package.xml").write_text(
@@ -1067,6 +1076,7 @@ class RuntimeWrapperContractTest(unittest.TestCase):
             "export CMAKE_PREFIX_PATH='%s:/opt/ros/noetic'\n"
             "export ROS_PACKAGE_PATH='%s/share:/opt/ros/noetic/share'\n"
             "export PYTHONPATH='/opt/ros/noetic/lib/python3/dist-packages'\n"
+            "export GAZEBO_PLUGIN_PATH='/opt/ros/noetic/lib'\n"
             "export LD_LIBRARY_PATH='%s/lib:/opt/ros/noetic/lib'\n" % (
                 install_root, install_root, install_root),
             encoding="utf-8",
@@ -1230,6 +1240,9 @@ class RuntimeWrapperContractTest(unittest.TestCase):
         install_models = runtime_root / (
             "install/p450-clean/share/prometheus_gazebo")
         expected_models = [
+            str(runtime_root / "install/p450-clean/share/"
+                "sim_platform_assets/models"),
+        ] + [
             str(install_models / relative)
             for relative in EXPECTED_LOCAL_MODEL_ROOTS
         ] + [str(checkout.root / "Tools/sitl_gazebo/models")]
@@ -1238,13 +1251,17 @@ class RuntimeWrapperContractTest(unittest.TestCase):
         plugin_root = checkout.root / (
             "build/amovlab_sitl_default/build_gazebo")
         local_plugin_root = runtime_root / EXPECTED_LOCAL_PLUGIN_ROOT
+        install_plugin_root = runtime_root / "install/p450-clean/lib"
         self.assertEqual(
-            "%s:%s" % (local_plugin_root, plugin_root),
+            "%s:%s:%s:/opt/ros/noetic/lib" % (
+                local_plugin_root, install_plugin_root, plugin_root),
             environment["GAZEBO_PLUGIN_PATH"],
         )
         self.assertEqual(
-            [str(local_plugin_root), str(plugin_root)],
-            environment["LD_LIBRARY_PATH"].split(":")[:2],
+            [str(local_plugin_root), str(install_plugin_root),
+             str(plugin_root), str(install_plugin_root),
+             "/opt/ros/noetic/lib"],
+            environment["LD_LIBRARY_PATH"].split(":"),
         )
         self.assertEqual(
             "%s:%s:%s/share:/opt/ros/noetic/share" % (
@@ -1280,6 +1297,44 @@ class RuntimeWrapperContractTest(unittest.TestCase):
             )
         self.assertNotEqual(0, result.returncode)
         self.assertIn("local plugin overlay", result.stderr)
+
+    def test_runtime_wrapper_rejects_asset_and_livox_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime_root, checkout, _probe = self._make_wrapper_fixture(root)
+            wrapper = runtime_root / "scripts/with_p450_env.bash"
+            models = (runtime_root /
+                      "install/p450-clean/share/sim_platform_assets/models")
+            escaped_models = root / "escaped models"
+            escaped_models.mkdir()
+            models.rmdir()
+            models.symlink_to(escaped_models, target_is_directory=True)
+            result = subprocess.run(
+                [str(wrapper), "/usr/bin/true"],
+                env={"PATH": "/usr/bin:/bin",
+                     "P450_PX4_ROOT": str(checkout.root)},
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, check=False)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("installed MID360 model root", result.stderr)
+
+            models.unlink()
+            models.mkdir()
+            plugin = (runtime_root /
+                      "install/p450-clean/lib/"
+                      "liblivox_laser_gazebo_plugins.so")
+            escaped_plugin = root / "escaped livox plugin"
+            shutil.copy2("/bin/true", escaped_plugin)
+            plugin.unlink()
+            plugin.symlink_to(escaped_plugin)
+            result = subprocess.run(
+                [str(wrapper), "/usr/bin/true"],
+                env={"PATH": "/usr/bin:/bin",
+                     "P450_PX4_ROOT": str(checkout.root)},
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, check=False)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("installed Livox plugin", result.stderr)
 
     def test_runtime_wrapper_maps_explicit_render_capability(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -10,6 +10,7 @@
   <arg name="uav1_init_z" default="0.15"/>
   <arg name="uav1_init_yaw" default="0.0"/>
   <arg name="px4_workdir" default="sitl_amov_0"/>
+  <arg name="enable_mid360" default="false"/>
 
   <include file="$(find gazebo_ros)/launch/empty_world.launch">
     <arg name="world_name" value="$(arg world)"/>
@@ -24,5 +25,6 @@
     <arg name="uav1_init_z" value="$(arg uav1_init_z)"/>
     <arg name="uav1_init_yaw" value="$(arg uav1_init_yaw)"/>
     <arg name="px4_workdir" value="$(arg px4_workdir)"/>
+    <arg name="enable_mid360" value="$(arg enable_mid360)"/>
   </include>
 </launch>

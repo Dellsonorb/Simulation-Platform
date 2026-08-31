@@ -94,6 +94,26 @@ for p450_model_root in "${p450_model_roots[@]}"; do
   fi
 done
 
+p450_assets_models="$p450_repo_root/install/p450-clean/share/sim_platform_assets/models"
+p450_assets_models_canonical=""
+if ! p450_assets_models_canonical="$(
+  /usr/bin/realpath -e -- "$p450_assets_models"
+)" || [[ "$p450_assets_models_canonical" != "$p450_assets_models" || \
+    ! -d "$p450_assets_models" || ! -r "$p450_assets_models" ]]; then
+  echo "installed MID360 model root is missing, unreadable, or escapes its canonical path: $p450_assets_models" >&2
+  exit 66
+fi
+
+p450_livox_plugin="$p450_repo_root/install/p450-clean/lib/liblivox_laser_gazebo_plugins.so"
+p450_livox_plugin_canonical=""
+if ! p450_livox_plugin_canonical="$(
+  /usr/bin/realpath -e -- "$p450_livox_plugin"
+)" || [[ "$p450_livox_plugin_canonical" != "$p450_livox_plugin" || \
+    ! -f "$p450_livox_plugin" || ! -r "$p450_livox_plugin" ]]; then
+  echo "installed Livox plugin is missing, unreadable, or escapes its canonical path: $p450_livox_plugin" >&2
+  exit 66
+fi
+
 # Variables in the literal below are intentionally expanded only by the child.
 # shellcheck disable=SC1004,SC2016
 exec "$p450_noetic_wrapper" \
@@ -108,9 +128,13 @@ exec "$p450_noetic_wrapper" \
     source "$p450_repo_root/install/p450-clean/setup.bash"
 
     p450_prometheus_share="$p450_repo_root/install/p450-clean/share/prometheus_gazebo"
+    p450_assets_models="$p450_repo_root/install/p450-clean/share/sim_platform_assets/models"
     p450_external_models="$p450_px4_root/Tools/sitl_gazebo/models"
     p450_external_plugins="$p450_px4_root/build/amovlab_sitl_default/build_gazebo"
     p450_local_plugins="$p450_repo_root/install/p450-runtime-overlays/lib"
+    p450_install_plugins="$p450_repo_root/install/p450-clean/lib"
+    p450_clean_gazebo_plugin_path="${GAZEBO_PLUGIN_PATH:-}"
+    p450_clean_ld_library_path="${LD_LIBRARY_PATH:-}"
 
     export P450_PX4_ROOT="$p450_px4_root"
     if [[ -n "$p450_gazebo_display" ]]; then
@@ -118,9 +142,9 @@ exec "$p450_noetic_wrapper" \
       export XAUTHORITY="$p450_gazebo_xauthority"
     fi
     export ROS_PACKAGE_PATH="$p450_px4_root:$p450_px4_root/Tools/sitl_gazebo${ROS_PACKAGE_PATH:+:$ROS_PACKAGE_PATH}"
-    export GAZEBO_MODEL_PATH="$p450_prometheus_share/gazebo_models/uav_models:$p450_prometheus_share/gazebo_models/sensor_models:$p450_prometheus_share/gazebo_models/scene_models:$p450_prometheus_share/gazebo_models/r200_models:$p450_prometheus_share/gazebo_models/texture:$p450_external_models"
-    export GAZEBO_PLUGIN_PATH="$p450_local_plugins:$p450_external_plugins"
-    export LD_LIBRARY_PATH="$p450_local_plugins:$p450_external_plugins${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export GAZEBO_MODEL_PATH="$p450_assets_models:$p450_prometheus_share/gazebo_models/uav_models:$p450_prometheus_share/gazebo_models/sensor_models:$p450_prometheus_share/gazebo_models/scene_models:$p450_prometheus_share/gazebo_models/r200_models:$p450_prometheus_share/gazebo_models/texture:$p450_external_models"
+    export GAZEBO_PLUGIN_PATH="$p450_local_plugins:$p450_install_plugins:$p450_external_plugins${p450_clean_gazebo_plugin_path:+:$p450_clean_gazebo_plugin_path}"
+    export LD_LIBRARY_PATH="$p450_local_plugins:$p450_install_plugins:$p450_external_plugins${p450_clean_ld_library_path:+:$p450_clean_ld_library_path}"
 
     p450_require_package_path() {
       local p450_package="$1"
@@ -138,7 +162,8 @@ exec "$p450_noetic_wrapper" \
       "$p450_px4_root/Tools/sitl_gazebo"
     for p450_package in \
         sim_platform_bringup prometheus_msgs realsense_ros_gazebo \
-        prometheus_gazebo prometheus_uav_control brick_aerial_perception; do
+        prometheus_gazebo prometheus_uav_control brick_aerial_perception \
+        sim_platform_assets livox_laser_gazebo_plugins; do
       p450_require_package_path "$p450_package" \
         "$p450_repo_root/install/p450-clean/share/$p450_package"
     done

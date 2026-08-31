@@ -9,7 +9,9 @@
       "realsense_ros_gazebo",
       "prometheus_gazebo",
       "prometheus_uav_control",
-      "brick_aerial_perception"
+      "brick_aerial_perception",
+      "sim_platform_assets",
+      "livox_laser_gazebo_plugins"
     ]
   },
   "px4": {

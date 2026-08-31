@@ -75,6 +75,7 @@ EXACT_MODIFIED = frozenset({
     "src/p450/livox_laser_gazebo_plugins/src/livox_points_plugin.cpp",
     "src/p450/prometheus_gazebo/CMakeLists.txt",
     "src/p450/prometheus_gazebo/package.xml",
+    "src/p450/prometheus_gazebo/gazebo_models/uav_models/p450_D435i_mid360/p450_D435i_mid360.sdf.jinja",
     "src/p450/prometheus_gazebo/test/test_p450_sensor_profiles.py",
     "src/p450/prometheus_msgs/CMakeLists.txt",
     "src/p450/prometheus_msgs/package.xml",
@@ -279,7 +280,7 @@ class RuntimeExtractionTest(unittest.TestCase):
         self.assertEqual(sorted(EXACT_MODIFIED),
                          list(overlay["modified"]))
         self.assertEqual(42, len(overlay["removed"]))
-        self.assertEqual(28, len(overlay["modified"]))
+        self.assertEqual(29, len(overlay["modified"]))
 
     def test_removed_files_are_tracked_upstream_and_absent_now(self):
         recorded = self.provenance["files"]

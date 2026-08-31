@@ -1013,8 +1013,9 @@ class Mid360FutureRuntimeContractTest(unittest.TestCase):
         args = {node.attrib["name"]: node.attrib.get("default") for node in launch.findall("arg")}
         self.assertEqual("false", args.get("enable_mid360"))
         runtime = json.loads(RUNTIME_CONFIG.read_text(encoding="utf-8"))
-        self.assertIn("sim_platform_assets", runtime["required_packages"])
-        self.assertIn("livox_laser_gazebo_plugins", runtime["required_packages"])
+        required_packages = runtime["ros"]["required_packages"]
+        self.assertIn("sim_platform_assets", required_packages)
+        self.assertIn("livox_laser_gazebo_plugins", required_packages)
 
 
 if __name__ == "__main__":
