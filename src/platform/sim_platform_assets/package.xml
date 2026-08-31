@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>sim_platform_assets</name>
+  <version>1.0.0</version>
+  <description>
+    Audited MID360 simulation assets pinned by config/mid360_assets.json;
+    redistribution license confirmation remains unresolved.
+  </description>
+
+  <maintainer email="simulation-platform@example.invalid">Simulation Platform Maintainers</maintainer>
+  <license>LicenseRef-Redistribution-Unresolved</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+</package>

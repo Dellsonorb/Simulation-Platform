@@ -132,6 +132,12 @@
       "destination": "src/platform/sim_platform_bringup",
       "imported": false
     },
+    "sim_platform_assets": {
+      "role": "platform",
+      "source": null,
+      "destination": "src/platform/sim_platform_assets",
+      "imported": false
+    },
     "ground_runtime_compat": {
       "role": "platform",
       "source": null,

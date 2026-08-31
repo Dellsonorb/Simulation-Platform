@@ -363,10 +363,10 @@ class PackageBoundaryTest(unittest.TestCase):
         self.assertEqual(18, len(imported_records))
         self.assertEqual(set(imported), {item.name for item in imported_records})
         self.assertEqual(
-            {"sim_platform_bringup"},
+            {"sim_platform_assets", "sim_platform_bringup"},
             {item.name for item in local_records},
         )
-        self.assertEqual(19, len(records))
+        self.assertEqual(20, len(records))
         self.assertEqual((), validate_packages(
             ROOT,
             imported,

@@ -119,6 +119,12 @@ EXPECTED_PACKAGE_RECORDS = {
         "src/platform/sim_platform_bringup",
         False,
     ),
+    "sim_platform_assets": (
+        "platform",
+        None,
+        "src/platform/sim_platform_assets",
+        False,
+    ),
     "ground_runtime_compat": (
         "platform",
         None,
