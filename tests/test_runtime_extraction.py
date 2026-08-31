@@ -1,3 +1,4 @@
+import ast
 import hashlib
 import json
 import re
@@ -103,50 +104,110 @@ def _load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _contains_bounded_reference(text, needle):
+    boundary = r"[A-Za-z0-9_.-]"
+    return re.search(
+        r"(?<!%s)%s(?!%s)" % (boundary, re.escape(needle), boundary),
+        text,
+    ) is not None
+
+
+def _removed_python_module(removed_path):
+    if (removed_path.suffix != ".py" or
+            len(removed_path.parts) <= 5 or
+            removed_path.parts[3] != "src"):
+        return None
+    module_parts = list(removed_path.parts[4:])
+    module_parts[-1] = Path(module_parts[-1]).stem
+    return ".".join(module_parts)
+
+
+def _python_imports(candidate, package_root, text):
+    try:
+        tree = ast.parse(text, filename=str(candidate))
+    except SyntaxError:
+        return frozenset()
+
+    relative = candidate.relative_to(package_root)
+    package_context = None
+    if (len(relative.parts) >= 3 and relative.parts[0] == "src"):
+        package_context = list(relative.parts[1:-1])
+
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+            continue
+        if not isinstance(node, ast.ImportFrom):
+            continue
+
+        if node.level:
+            if package_context is None or node.level > len(package_context):
+                continue
+            keep = len(package_context) - (node.level - 1)
+            base_parts = package_context[:keep]
+            if node.module:
+                base_parts.extend(node.module.split("."))
+            base = ".".join(base_parts)
+        else:
+            base = node.module or ""
+        if base:
+            imported.add(base)
+        for alias in node.names:
+            if alias.name == "*":
+                continue
+            imported.add(".".join(part for part in (base, alias.name)
+                                  if part))
+    return frozenset(imported)
+
+
 def _find_removed_entrypoint_references(root, package_roots, removed_paths):
-    candidates = set()
+    candidates = {}
     excluded_python_directories = {
         "docs", "generated", "results", "test", "tests", "__pycache__",
     }
     for package_root in package_roots:
         cmake = package_root / "CMakeLists.txt"
         if cmake.is_file():
-            candidates.add(cmake)
+            candidates[cmake] = package_root
         launch_root = package_root / "launch"
         if launch_root.is_dir():
-            candidates.update(path for path in launch_root.rglob("*.launch")
-                              if path.is_file())
-        candidates.update(
-            path for path in package_root.rglob("*.py")
+            for path in launch_root.rglob("*.launch"):
+                if path.is_file():
+                    candidates[path] = package_root
+        for path in package_root.rglob("*.py"):
             if (path.is_file() and not any(
                 part in excluded_python_directories
                 for part in path.relative_to(package_root).parts[:-1]
-            ))
-        )
+            )):
+                candidates[path] = package_root
+
+    removed_records = []
+    for removed in removed_paths:
+        removed_path = Path(removed)
+        removed_records.append((
+            removed,
+            {
+                removed,
+                Path(*removed_path.parts[3:]).as_posix(),
+                Path(*removed_path.parts[2:]).as_posix(),
+                removed_path.name,
+            },
+            _removed_python_module(removed_path),
+        ))
 
     findings = set()
-    for candidate in candidates:
+    for candidate, package_root in candidates.items():
         candidate_relative = candidate.relative_to(root).as_posix()
         if candidate_relative in removed_paths:
             continue
         text = candidate.read_text(encoding="utf-8")
-        for removed in removed_paths:
-            removed_path = Path(removed)
-            package_relative = Path(*removed_path.parts[3:]).as_posix()
-            package_qualified = Path(*removed_path.parts[2:]).as_posix()
-            needles = {
-                removed,
-                package_relative,
-                package_qualified,
-                removed_path.name,
-            }
-            if (removed_path.suffix == ".py" and
-                    len(removed_path.parts) > 5 and
-                    removed_path.parts[3] == "src"):
-                module_parts = list(removed_path.parts[4:])
-                module_parts[-1] = Path(module_parts[-1]).stem
-                needles.add(".".join(module_parts))
-            if any(needle in text for needle in needles):
+        imported = (_python_imports(candidate, package_root, text)
+                    if candidate.suffix == ".py" else frozenset())
+        for removed, needles, module in removed_records:
+            if (any(_contains_bounded_reference(text, needle)
+                    for needle in needles) or
+                    (module is not None and module in imported)):
                 findings.add((candidate_relative, removed))
     return tuple(sorted(findings))
 
@@ -261,9 +322,24 @@ class RuntimeExtractionTest(unittest.TestCase):
             (consumer_package / "scripts").mkdir(parents=True)
             reference = consumer_package / "scripts/cross_package_reference.py"
             reference.write_text(
-                "ENTRYPOINT = 'retired_entrypoint.py'\n"
-                "import source_package.retired_module\n",
+                "ENTRYPOINT = 'retired_entrypoint.py'\n",
                 encoding="utf-8")
+            absolute_import = consumer_package / "scripts/absolute_import.py"
+            absolute_import.write_text(
+                "import source_package.retired_module\n", encoding="utf-8")
+            from_import = consumer_package / "scripts/from_import.py"
+            from_import.write_text(
+                "from source_package import retired_module\n",
+                encoding="utf-8")
+            near_name = consumer_package / "scripts/near_name.py"
+            near_name.write_text(
+                "import source_package.retired_module_helpers\n",
+                encoding="utf-8")
+            source_module = source_package / "src/source_package"
+            source_module.mkdir(parents=True)
+            relative_import = source_module / "relative_import.py"
+            relative_import.write_text(
+                "from .retired_module import VALUE\n", encoding="utf-8")
 
             findings = _find_removed_entrypoint_references(
                 fixture_root,
@@ -278,10 +354,18 @@ class RuntimeExtractionTest(unittest.TestCase):
             self.assertEqual(
                 (
                     ("src/ground/consumer_package/scripts/"
+                     "absolute_import.py",
+                     "src/p450/source_package/src/source_package/"
+                     "retired_module.py"),
+                    ("src/ground/consumer_package/scripts/"
                      "cross_package_reference.py",
                      "src/p450/source_package/scripts/retired_entrypoint.py"),
                     ("src/ground/consumer_package/scripts/"
-                     "cross_package_reference.py",
+                     "from_import.py",
+                     "src/p450/source_package/src/source_package/"
+                     "retired_module.py"),
+                    ("src/p450/source_package/src/source_package/"
+                     "relative_import.py",
                      "src/p450/source_package/src/source_package/"
                      "retired_module.py"),
                 ),
