@@ -20,6 +20,14 @@ FORBIDDEN_PATH_PARTS = {
     "__pycache__",
     ".pytest_cache",
 }
+EXPECTED_MATERIALIZED_LOCAL_PACKAGES = frozenset({
+    "sim_platform_bringup",
+})
+EXPECTED_ABSENT_LOCAL_PACKAGES = frozenset({
+    "air_ground_pick_demo",
+    "air_ground_pose_bridge",
+    "ground_runtime_compat",
+})
 
 
 def _is_regular_file(path):
@@ -45,7 +53,7 @@ class ImportedLayoutTest(unittest.TestCase):
             for spec in cls.manifest.packages.values()
             if spec.imported
         )
-        cls.neutral_packages = tuple(
+        cls.local_packages = tuple(
             spec
             for spec in cls.manifest.packages.values()
             if not spec.imported
@@ -54,7 +62,7 @@ class ImportedLayoutTest(unittest.TestCase):
     def test_manifest_declares_exact_import_counts(self):
         self.assertEqual(18, len(self.imported_packages))
         self.assertEqual(11, len(self.manifest.auxiliary_imports))
-        self.assertEqual(4, len(self.neutral_packages))
+        self.assertEqual(4, len(self.local_packages))
 
     def test_all_required_paths_are_directories(self):
         self.assertEqual(10, len(self.manifest.required_paths))
@@ -72,9 +80,26 @@ class ImportedLayoutTest(unittest.TestCase):
             )
             self.assertEqual(spec.name, actual_name, spec.destination)
 
-    def test_neutral_packages_are_not_materialized(self):
-        for spec in self.neutral_packages:
-            self.assertFalse((ROOT / spec.destination).exists(), spec.name)
+    def test_declared_local_package_materialization_is_exact(self):
+        materialized = set()
+        absent = set()
+        for spec in self.local_packages:
+            package_root = ROOT / spec.destination
+            if (not package_root.exists() and
+                    not package_root.is_symlink()):
+                absent.add(spec.name)
+                continue
+            self.assertTrue(package_root.is_dir(), spec.destination)
+            self.assertFalse(package_root.is_symlink(), spec.destination)
+            package_xml = package_root / "package.xml"
+            self.assertTrue(package_xml.is_file(), package_xml.as_posix())
+            self.assertFalse(package_xml.is_symlink(), package_xml.as_posix())
+            actual_name = ET.parse(str(package_xml)).getroot().findtext("name")
+            self.assertEqual(spec.name, actual_name, spec.destination)
+            materialized.add(spec.name)
+
+        self.assertEqual(EXPECTED_MATERIALIZED_LOCAL_PACKAGES, materialized)
+        self.assertEqual(EXPECTED_ABSENT_LOCAL_PACKAGES, absent)
 
     def test_auxiliary_destinations_are_regular_files(self):
         for item in self.manifest.auxiliary_imports:

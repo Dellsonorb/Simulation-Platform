@@ -305,19 +305,150 @@ class PackageBoundaryTest(unittest.TestCase):
                 forbidden or {"paper_benchmark"},
             )
 
-    def test_real_repository_has_exact_imported_package_set(self):
+    def _validate_manifest_fixture(self, files, packages, directories=()):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for relative in directories:
+                (root / relative).mkdir(parents=True, exist_ok=True)
+            for relative, content in files.items():
+                _write(root, relative, content)
+            _write(root, "config/runtime_sources.json", json.dumps({
+                "packages": packages,
+                "forbidden": {
+                    "package_names": ["paper_benchmark"],
+                    "runtime_tokens": [],
+                },
+            }))
+            _write(root, "config/runtime_overlay.json", json.dumps({
+                "removed": [],
+            }))
+            return tuple(
+                item for item in validate_repository(root)
+                if item.token.startswith("package:")
+            )
+
+    @staticmethod
+    def _declared_package_specs():
+        return {
+            "alpha": {
+                "destination": "src/p450/alpha",
+                "imported": True,
+            },
+            "local_bridge": {
+                "destination": "src/platform/local_bridge",
+                "imported": False,
+            },
+        }
+
+    def test_real_repository_has_exact_declared_package_set(self):
         manifest = json.loads(
             (ROOT / "config/runtime_sources.json").read_text(encoding="utf-8"))
-        expected = {
+        imported = {
             name: item["destination"]
             for name, item in manifest["packages"].items()
             if item["imported"]
         }
+        declared_local = {
+            name: item["destination"]
+            for name, item in manifest["packages"].items()
+            if not item["imported"]
+        }
         records = discover_packages(ROOT)
-        self.assertEqual(18, len(records))
-        self.assertEqual(set(expected), {item.name for item in records})
+        imported_records = tuple(
+            item for item in records if item.name in imported)
+        local_records = tuple(
+            item for item in records if item.name in declared_local)
+        self.assertEqual(18, len(imported_records))
+        self.assertEqual(set(imported), {item.name for item in imported_records})
+        self.assertEqual(
+            {"sim_platform_bringup"},
+            {item.name for item in local_records},
+        )
+        self.assertEqual(19, len(records))
         self.assertEqual((), validate_packages(
-            ROOT, expected, set(manifest["forbidden"]["package_names"])))
+            ROOT,
+            imported,
+            set(manifest["forbidden"]["package_names"]),
+            declared_local,
+        ))
+
+    def test_declared_local_package_is_optional_then_exact_when_present(self):
+        packages = self._declared_package_specs()
+        required = {
+            "src/p450/alpha/package.xml": _package_xml("alpha"),
+        }
+        self.assertEqual(
+            (), self._validate_manifest_fixture(required, packages))
+        self.assertEqual(
+            (),
+            self._validate_manifest_fixture({
+                **required,
+                "src/platform/local_bridge/package.xml":
+                    _package_xml("local_bridge"),
+            }, packages),
+        )
+
+    def test_declared_local_mutations_fail_closed(self):
+        packages = self._declared_package_specs()
+        baseline = {
+            "src/p450/alpha/package.xml": _package_xml("alpha"),
+        }
+        cases = (
+            (
+                {**baseline,
+                 "src/platform/wrong/package.xml":
+                     _package_xml("local_bridge")},
+                (),
+                "package:wrong-path:local_bridge",
+            ),
+            (
+                {**baseline,
+                 "src/platform/local_bridge/package.xml":
+                     _package_xml("wrong_name")},
+                (),
+                "package:wrong-name:local_bridge:wrong_name",
+            ),
+            (
+                {**baseline,
+                 "src/platform/local_bridge/package.xml":
+                     _package_xml("local_bridge"),
+                 "src/platform/duplicate/package.xml":
+                     _package_xml("local_bridge")},
+                (),
+                "package:duplicate:local_bridge",
+            ),
+            (
+                {**baseline,
+                 "src/p450/alpha/nested/package.xml":
+                     _package_xml("local_bridge")},
+                (),
+                "package:nested:local_bridge",
+            ),
+            (
+                baseline,
+                ("src/platform/local_bridge",),
+                "package:missing:local_bridge",
+            ),
+        )
+        for files, directories, token in cases:
+            with self.subTest(token=token):
+                findings = self._validate_manifest_fixture(
+                    files, packages, directories)
+                self.assertIn(token, _tokens(findings), findings)
+
+    def test_missing_imported_package_remains_mandatory(self):
+        findings = self._validate_manifest_fixture(
+            {}, self._declared_package_specs())
+        self.assertIn("package:missing:alpha", _tokens(findings), findings)
+        self.assertNotIn(
+            "package:missing:local_bridge", _tokens(findings), findings)
+
+    def test_unlisted_package_is_rejected_with_declared_local_packages(self):
+        findings = self._validate_manifest_fixture({
+            "src/p450/alpha/package.xml": _package_xml("alpha"),
+            "src/platform/unknown/package.xml": _package_xml("unknown"),
+        }, self._declared_package_specs())
+        self.assertIn("package:unlisted:unknown", _tokens(findings), findings)
 
     def test_package_mutations_are_rejected(self):
         baseline = {
@@ -504,6 +635,22 @@ class RepositoryIntegrationTest(unittest.TestCase):
              "boundary:manifest-schema"),
             ({"packages": {}, "forbidden": []}, valid_overlay,
              "config/runtime_sources.json", "boundary:manifest-schema"),
+            ({"packages": {
+                "local": {"imported": False, "destination": "../escape"},
+             }, "forbidden": valid_manifest["forbidden"]},
+             valid_overlay, "config/runtime_sources.json",
+             "boundary:manifest-schema"),
+            ({"packages": {
+                "local": {"imported": False, "destination": "/tmp/local"},
+             }, "forbidden": valid_manifest["forbidden"]},
+             valid_overlay, "config/runtime_sources.json",
+             "boundary:manifest-schema"),
+            ({"packages": {
+                "one": {"imported": True, "destination": "src/shared"},
+                "two": {"imported": False, "destination": "src/shared"},
+             }, "forbidden": valid_manifest["forbidden"]},
+             valid_overlay, "config/runtime_sources.json",
+             "boundary:manifest-schema"),
             (valid_manifest, {}, "config/runtime_overlay.json",
              "boundary:overlay-schema"),
             (valid_manifest, {"removed": "not-a-list"},

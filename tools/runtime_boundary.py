@@ -398,10 +398,18 @@ def _find_dependency_line(text, tag, name):
     return 0 if match is None else _line_number(text, match.start())
 
 
-def validate_packages(root, expected_packages, forbidden_packages):
+def validate_packages(root, expected_packages, forbidden_packages,
+                      optional_packages=None):
+    """Validate mandatory imports and any materialized declared local package."""
     root = Path(root)
-    expected = {name: Path(destination).as_posix()
+    required = {name: Path(destination).as_posix()
                 for name, destination in expected_packages.items()}
+    optional = {
+        name: Path(destination).as_posix()
+        for name, destination in (optional_packages or {}).items()
+    }
+    declared = dict(optional)
+    declared.update(required)
     forbidden = {name.casefold() for name in forbidden_packages}
     findings = set()
     parsed_records = []
@@ -439,10 +447,10 @@ def validate_packages(root, expected_packages, forbidden_packages):
                for other in package_directories):
             findings.add(Finding(record.path, 0, "package:nested:%s" %
                                  record.name))
-        if record.name not in expected:
+        if record.name not in declared:
             findings.add(Finding(record.path, 0, "package:unlisted:%s" %
                                  record.name))
-        elif directory.as_posix() != expected[record.name]:
+        elif directory.as_posix() != declared[record.name]:
             findings.add(Finding(record.path, 0, "package:wrong-path:%s" %
                                  record.name))
 
@@ -452,15 +460,21 @@ def validate_packages(root, expected_packages, forbidden_packages):
                 findings.add(Finding(
                     record.path, 0, "package:duplicate:%s" % name))
 
-    for name, destination in expected.items():
+    for name, destination in declared.items():
         expected_file = "%s/package.xml" % destination
         at_destination = by_directory.get(destination)
         if at_destination is not None and at_destination.name != name:
             findings.add(Finding(
                 at_destination.path, 0,
                 "package:wrong-name:%s:%s" % (name, at_destination.name)))
-        if not any(record.name == name and record.path == expected_file
-                   for record in parsed_records):
+        exact_record = any(
+            record.name == name and record.path == expected_file
+            for record in parsed_records
+        )
+        destination_path = root / destination
+        materialized = (destination_path.exists() or
+                        destination_path.is_symlink())
+        if not exact_record and (name in required or materialized):
             findings.add(Finding(
                 expected_file, 0, "package:missing:%s" % name))
 
@@ -665,6 +679,7 @@ def _valid_manifest_boundary_schema(manifest):
         return False
     if not _is_string_list(forbidden.get("runtime_tokens")):
         return False
+    destinations = set()
     for name, item in packages.items():
         if not isinstance(name, str) or not name or not isinstance(item, dict):
             return False
@@ -673,6 +688,13 @@ def _valid_manifest_boundary_schema(manifest):
         destination = item.get("destination")
         if not isinstance(destination, str) or not destination:
             return False
+        path = Path(destination)
+        if (path.is_absolute() or path.as_posix() != destination or
+                len(path.parts) < 2 or path.parts[0] != "src" or
+                any(part in ("", ".", "..") for part in path.parts) or
+                destination in destinations):
+            return False
+        destinations.add(destination)
     return True
 
 
@@ -718,11 +740,17 @@ def validate_repository(root):
         for name, item in manifest["packages"].items()
         if item["imported"]
     }
+    optional_packages = {
+        name: item["destination"]
+        for name, item in manifest["packages"].items()
+        if not item["imported"]
+    }
     forbidden = manifest["forbidden"]
     findings.update(scan_active_content(
         root, forbidden["runtime_tokens"]))
     findings.update(validate_packages(
-        root, expected_packages, forbidden["package_names"]))
+        root, expected_packages, forbidden["package_names"],
+        optional_packages))
     findings.update(validate_startup_spawns(root))
     findings.update(scan_removed_references(root, overlay["removed"]))
     return tuple(sorted(findings))
