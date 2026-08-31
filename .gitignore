@@ -1,0 +1,8 @@
+build/
+devel/
+install/
+logs/
+.catkin_tools/
+__pycache__/
+*.pyc
+.import-staging-*/
