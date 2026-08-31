@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "ros": {
+    "distribution": "noetic",
+    "root": "/opt/ros/noetic",
+    "install_space": "install/p450-clean",
+    "required_packages": [
+      "prometheus_msgs",
+      "realsense_ros_gazebo",
+      "prometheus_gazebo",
+      "prometheus_uav_control",
+      "brick_aerial_perception"
+    ]
+  },
+  "px4": {
+    "commit": "713814f4eea5990e49dd776a38a36ad53e171f60",
+    "sitl_gazebo": {
+      "path": "Tools/sitl_gazebo",
+      "commit": "9566172e7c0760f66681304b963d675c5b120daf"
+    },
+    "artifacts": {
+      "binary": "build/amovlab_sitl_default/bin/px4",
+      "romfs": "ROMFS/px4fmu_common",
+      "startup_script": "ROMFS/px4fmu_common/init.d-posix/rcS",
+      "jinja_generator": "Tools/sitl_gazebo/scripts/jinja_gen.py",
+      "model_root": "Tools/sitl_gazebo/models",
+      "required_model_files": [
+        "Tools/sitl_gazebo/models/gps/model.config",
+        "Tools/sitl_gazebo/models/gps/gps.sdf"
+      ],
+      "plugin_root": "build/amovlab_sitl_default/build_gazebo",
+      "plugins": [
+        "libgazebo_barometer_plugin.so",
+        "libgazebo_gps_plugin.so",
+        "libgazebo_groundtruth_plugin.so",
+        "libgazebo_imu_plugin.so",
+        "libgazebo_magnetometer_plugin.so",
+        "libgazebo_mavlink_interface.so",
+        "libgazebo_motor_model.so",
+        "libgazebo_multirotor_base_plugin.so"
+      ],
+      "support_libraries": [
+        "libmav_msgs.so",
+        "libnav_msgs.so",
+        "libphysics_msgs.so",
+        "libsensor_msgs.so",
+        "libstd_msgs.so"
+      ]
+    }
+  },
+  "gazebo": {
+    "local_model_roots": [
+      "gazebo_models/uav_models",
+      "gazebo_models/sensor_models",
+      "gazebo_models/scene_models",
+      "gazebo_models/r200_models",
+      "gazebo_models/texture"
+    ]
+  }
+}
