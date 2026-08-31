@@ -1,4 +1,9 @@
+import json
+import os
+import pwd
 import re
+import stat
+import subprocess
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -6,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 P450 = ROOT / "src/p450"
+NOETIC_WRAPPER = ROOT / "scripts/with_noetic_env.bash"
 
 EXPECTED_VENDOR_FILES = frozenset({
     "common/include/geometry_utils.h",
@@ -1031,6 +1037,152 @@ class P450BuildContractTest(unittest.TestCase):
             actual = _catkin_components(package) | _all_manifest_dependencies(package)
             with self.subTest(package=package):
                 self.assertFalse(actual & FORBIDDEN_DEPENDENCIES)
+
+
+class NoeticEnvironmentWrapperContractTest(unittest.TestCase):
+    def _require_wrapper(self):
+        self.assertTrue(
+            NOETIC_WRAPPER.is_file(),
+            "scripts/with_noetic_env.bash must exist before the clean "
+            "Catkin build",
+        )
+
+    def _run_wrapper(self, command):
+        self._require_wrapper()
+        poison = "P450_WRAPPER_POISON_91A7"
+        ambient = {
+            "HOME": "/%s/home" % poison,
+            "USER": poison,
+            "LOGNAME": poison,
+            "SHELL": "/%s/bash" % poison,
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PATH": "/%s/bin:/usr/bin:/bin" % poison,
+            "CMAKE_PREFIX_PATH": "/%s/cmake" % poison,
+            "ROS_PACKAGE_PATH": "/%s/ros" % poison,
+            "ROS_MASTER_URI": "http://%s:11311" % poison,
+            "ROS_IP": poison,
+            "ROS_HOSTNAME": poison,
+            "PYTHONPATH": "/%s/python" % poison,
+            "PYTHONHOME": "/%s/python-home" % poison,
+            "LD_LIBRARY_PATH": "/%s/lib" % poison,
+            "GAZEBO_MODEL_PATH": "/%s/models" % poison,
+            "GAZEBO_PLUGIN_PATH": "/%s/plugins" % poison,
+            "GAZEBO_RESOURCE_PATH": "/%s/resources" % poison,
+            "DISPLAY": ":91",
+            "CATKIN_PROFILE": poison,
+            "AMENT_PREFIX_PATH": "/%s/ament" % poison,
+            "COLCON_PREFIX_PATH": "/%s/colcon" % poison,
+            "VIRTUAL_ENV": "/%s/venv" % poison,
+            "CONDA_PREFIX": "/%s/conda" % poison,
+            "P450_UNRELATED_SENTINEL": poison,
+        }
+        return subprocess.run(
+            [str(NOETIC_WRAPPER)] + list(command),
+            cwd=str(ROOT),
+            env=ambient,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+
+    def test_wrapper_is_executable_and_has_one_clean_setup_boundary(self):
+        self._require_wrapper()
+        mode = NOETIC_WRAPPER.lstat().st_mode
+        self.assertTrue(stat.S_ISREG(mode))
+        self.assertFalse(NOETIC_WRAPPER.is_symlink())
+        self.assertTrue(mode & 0o111)
+
+        text = NOETIC_WRAPPER.read_text(encoding="utf-8")
+        self.assertEqual(1, text.count("source /opt/ros/noetic/setup.bash"))
+        for contract in (
+            "/usr/bin/env -i",
+            "/bin/bash --noprofile --norc",
+            'p450_command=("$@")',
+            "set --",
+            'exec "${p450_command[@]}"',
+        ):
+            self.assertIn(contract, text)
+        self.assertNotIn("/home/lu", text)
+        self.assertNotIn(str(ROOT), text)
+
+    def test_wrapper_scrubs_ambient_workspaces_and_uses_local_state(self):
+        result = self._run_wrapper((
+            "/usr/bin/python3",
+            "-c",
+            "import json, os; print(json.dumps(dict(os.environ), "
+            "sort_keys=True))",
+        ))
+        self.assertEqual(0, result.returncode, result.stderr)
+        environment = json.loads(result.stdout)
+        login = pwd.getpwuid(os.getuid())
+
+        expected = {
+            "HOME": login.pw_dir,
+            "USER": login.pw_name,
+            "LOGNAME": login.pw_name,
+            "SHELL": "/bin/bash",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "PATH": "/opt/ros/noetic/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            "ROS_HOME": str(ROOT / "logs/ros"),
+            "ROS_LOG_DIR": str(ROOT / "logs/ros/log"),
+            "GAZEBO_LOG_PATH": str(ROOT / "logs/gazebo"),
+            "XDG_CONFIG_HOME": str(ROOT / "logs/xdg/config"),
+            "XDG_CACHE_HOME": str(ROOT / "logs/xdg/cache"),
+            "CMAKE_PREFIX_PATH": "/opt/ros/noetic",
+            "ROS_PACKAGE_PATH": "/opt/ros/noetic/share",
+            "ROS_DISTRO": "noetic",
+        }
+        for name, value in expected.items():
+            with self.subTest(name=name):
+                self.assertEqual(value, environment.get(name))
+
+        poison = "P450_WRAPPER_POISON_91A7"
+        self.assertFalse(
+            any(poison in value for value in environment.values()),
+            "ambient workspace value survived env -i",
+        )
+        for name in (
+            "AMENT_PREFIX_PATH",
+            "CATKIN_PROFILE",
+            "COLCON_PREFIX_PATH",
+            "CONDA_PREFIX",
+            "DISPLAY",
+            "GAZEBO_MODEL_PATH",
+            "GAZEBO_PLUGIN_PATH",
+            "GAZEBO_RESOURCE_PATH",
+            "P450_UNRELATED_SENTINEL",
+            "PYTHONHOME",
+            "ROS_HOSTNAME",
+            "ROS_IP",
+            "ROS_MASTER_URI",
+            "VIRTUAL_ENV",
+        ):
+            with self.subTest(scrubbed=name):
+                self.assertNotIn(name, environment)
+
+        for path in (
+            ROOT / "logs/ros",
+            ROOT / "logs/ros/log",
+            ROOT / "logs/gazebo",
+            ROOT / "logs/xdg/config",
+            ROOT / "logs/xdg/cache",
+        ):
+            with self.subTest(directory=path.relative_to(ROOT).as_posix()):
+                self.assertTrue(path.is_dir())
+
+    def test_wrapper_preserves_arguments_and_command_exit_status(self):
+        expected_arguments = ["--help", "--extend", "--local", "two words"]
+        result = self._run_wrapper((
+            "/usr/bin/python3",
+            "-c",
+            "import json, sys; print(json.dumps(sys.argv[1:])); "
+            "raise SystemExit(37)",
+        ) + tuple(expected_arguments))
+        self.assertEqual(37, result.returncode, result.stderr)
+        self.assertEqual(expected_arguments, json.loads(result.stdout))
 
 
 if __name__ == "__main__":
