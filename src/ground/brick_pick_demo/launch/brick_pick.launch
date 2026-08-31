@@ -1,0 +1,13 @@
+<launch>
+  <arg name="planning_frame" default="world"/>
+  <arg name="brick_orientation_mode" default="flat"/>
+  <arg name="gripper_motion_time" default="2.0"/>
+  <rosparam command="load" file="$(find brick_pick_demo)/config/grasp.yaml" ns="brick_pick_node"/>
+  <param name="brick_pick_node/grasp/planning_frame" value="$(arg planning_frame)"/>
+  <param name="brick_pick_node/brick/orientation_mode"
+         value="$(arg brick_orientation_mode)"/>
+  <param name="brick_pick_node/gripper/motion_time"
+         value="$(arg gripper_motion_time)"/>
+  <node name="brick_pick_node" pkg="brick_pick_demo" type="brick_pick_node"
+        output="screen" required="true"/>
+</launch>

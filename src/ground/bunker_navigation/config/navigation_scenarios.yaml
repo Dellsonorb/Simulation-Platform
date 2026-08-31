@@ -1,0 +1,15 @@
+scenarios:
+  - {id: forward_1m, x: 1.00, y: 0.00, yaw: 0.000000}
+  - {id: forward_left_30, x: 0.90, y: 0.45, yaw: 0.523599}
+  - {id: forward_right_m30, x: 0.90, y: -0.45, yaw: -0.523599}
+  - {id: mid_left_25, x: 0.70, y: 0.20, yaw: 0.436332}
+  - {id: mid_right_m25, x: 0.70, y: -0.20, yaw: -0.436332}
+  - {id: far_left_30, x: 1.20, y: 0.25, yaw: 0.523599}
+  - {id: far_right_m30, x: 1.20, y: -0.25, yaw: -0.523599}
+  - {id: near_left_20, x: 0.50, y: 0.20, yaw: 0.349066}
+  - {id: near_right_m20, x: 0.50, y: -0.20, yaw: -0.349066}
+  - {id: forward_15, x: 1.10, y: 0.10, yaw: 0.261799}
+  - {id: rear_left_gate, x: -1.00, y: 0.25, yaw: 2.896614, expect_heading_gate: true}
+  - {id: rear_right_gate, x: -1.00, y: -0.25, yaw: -2.896614, expect_heading_gate: true}
+  - {id: rear_straight_gate, x: -1.10, y: 0.00, yaw: 3.141593, expect_heading_gate: true}
+  - {id: near_rear_reverse_allowed, x: -0.40, y: 0.00, yaw: 3.141593, expect_heading_gate: false}

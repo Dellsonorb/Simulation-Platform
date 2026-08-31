@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<robot name="ag95_only" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:include filename="$(find dh_ag95_description)/urdf/ag95_macro.xacro"/>
+
+  <link name="world"/>
+  <xacro:dh_ag95_gripper prefix="" parent="world"
+      transmission_hw_interface="hardware_interface/PositionJointInterface">
+    <origin xyz="0 0 1.0" rpy="0 0 0"/>
+  </xacro:dh_ag95_gripper>
+
+  <gazebo>
+    <plugin name="gazebo_ros_control" filename="libgazebo_ros_control.so">
+      <robotNamespace>/</robotNamespace>
+      <robotParam>/robot_description</robotParam>
+    </plugin>
+  </gazebo>
+</robot>

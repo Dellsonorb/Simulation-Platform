@@ -1,0 +1,12 @@
+<launch>
+  <include file="$(find brick_pick_demo)/launch/full_demo.launch">
+    <arg name="gui" value="false"/>
+    <arg name="publish_manual_pose" value="true"/>
+    <arg name="brick_orientation_mode" value="side_up"/>
+    <arg name="mobile_manipulation_startup" value="true"/>
+    <arg name="ag95_effort_coupled" value="true"/>
+    <arg name="gripper_motion_time" value="8.0"/>
+  </include>
+  <test test-name="full_pick" pkg="brick_pick_demo"
+        type="test_full_pick.py" time-limit="120"/>
+</launch>

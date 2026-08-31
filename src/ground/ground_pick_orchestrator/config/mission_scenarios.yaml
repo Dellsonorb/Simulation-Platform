@@ -1,0 +1,37 @@
+scenarios:
+  - {id: front_center, brick_x: 2.0, brick_y: 0.0, brick_yaw: 0.0, expect_success: true}
+  - {id: front_left_30, brick_x: 2.0, brick_y: 0.5, brick_yaw: 0.523599, expect_success: true}
+  - {id: front_right_60, brick_x: 2.0, brick_y: -0.5, brick_yaw: 1.047198, expect_success: true}
+  - {id: left_workspace_90, brick_x: 1.5, brick_y: 1.2, brick_yaw: 1.570796, expect_success: true}
+  - {id: right_workspace_120, brick_x: 1.5, brick_y: -1.2, brick_yaw: 2.094395, expect_success: true}
+  - {id: far_oblique_45, brick_x: 3.0, brick_y: 0.6, brick_yaw: 0.785398, expect_success: true}
+  - {id: rear_gate_0, brick_x: -1.8, brick_y: 0.0, brick_yaw: 0.0, expect_success: true}
+  - {id: rear_left_30, brick_x: -1.8, brick_y: 0.5, brick_yaw: 0.523599, expect_success: true}
+  - {id: side_left_90, brick_x: 0.0, brick_y: 2.0, brick_yaw: 1.570796, expect_success: true}
+  - id: front_center_150
+    brick_x: 2.0
+    brick_y: 0.0
+    brick_yaw: 2.617994
+    expect_success: true
+  - id: navigation_rejection
+    brick_x: 8.0
+    brick_y: 0.0
+    brick_yaw: 0.0
+    expect_success: false
+    expected_failure: navigation_failed
+  - id: perception_rejection
+    brick_x: 2.0
+    brick_y: 2.0
+    brick_yaw: 0.0
+    known_x: 2.0
+    known_y: 0.0
+    known_yaw: 0.0
+    expect_success: false
+    expected_failure: perception_rejected
+  - id: planning_rejection
+    brick_x: 2.0
+    brick_y: 0.0
+    brick_yaw: 0.0
+    expect_success: false
+    expected_failure: planning_failed
+    force_planning_failure: true

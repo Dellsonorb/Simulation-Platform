@@ -1,0 +1,10 @@
+joint_names:
+  - shoulder_pan_joint
+  - shoulder_lift_joint
+  - elbow_joint
+  - wrist_1_joint
+  - wrist_2_joint
+  - wrist_3_joint
+positions: [0.2040, -0.9584, 1.7778, 1.1465, 1.5710, 0.2038]
+duration: 5.0
+goal_tolerance: 0.08

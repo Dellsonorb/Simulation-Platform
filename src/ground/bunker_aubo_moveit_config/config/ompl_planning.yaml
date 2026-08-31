@@ -1,0 +1,9 @@
+planner_configs:
+  RRTConnectkConfigDefault:
+    type: geometric::RRTConnect
+    range: 0.0
+manipulator:
+  default_planner_config: RRTConnectkConfigDefault
+  planner_configs: [RRTConnectkConfigDefault]
+  projection_evaluator: joints(shoulder_pan_joint,shoulder_lift_joint)
+  longest_valid_segment_fraction: 0.005

@@ -1,0 +1,33 @@
+<launch>
+  <arg name="gui" default="true"/>
+  <arg name="image_view" default="true"/>
+  <arg name="move_to_observation" default="true"/>
+  <arg name="camera_topic_prefix" default="/camera"/>
+  <arg name="camera_image_width" default="640"/>
+  <arg name="camera_image_height" default="480"/>
+  <arg name="camera_update_rate" default="15.0"/>
+
+  <include file="$(find bunker_aubo_gazebo)/launch/brick_world.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="brick_x" value="0.75"/>
+    <arg name="camera_enable_rgbd" value="true"/>
+    <arg name="camera_topic_prefix" value="$(arg camera_topic_prefix)"/>
+    <arg name="camera_image_width" value="$(arg camera_image_width)"/>
+    <arg name="camera_image_height" value="$(arg camera_image_height)"/>
+    <arg name="camera_update_rate" value="$(arg camera_update_rate)"/>
+  </include>
+
+  <node if="$(arg move_to_observation)" name="move_to_camera_observation"
+        pkg="bunker_aubo_gazebo" type="move_to_camera_observation.py"
+        output="screen">
+    <rosparam command="load"
+              file="$(find bunker_aubo_gazebo)/config/camera_observation.yaml"/>
+  </node>
+
+  <node if="$(arg image_view)" name="d435_rgb_view" pkg="rqt_image_view"
+        type="rqt_image_view" args="$(arg camera_topic_prefix)/color/image_raw"
+        output="screen"/>
+  <node if="$(arg image_view)" name="d435_depth_view" pkg="rqt_image_view"
+        type="rqt_image_view" args="$(arg camera_topic_prefix)/depth/image_rect_raw"
+        output="screen"/>
+</launch>

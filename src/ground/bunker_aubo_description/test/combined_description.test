@@ -1,0 +1,6 @@
+<launch>
+  <param name="robot_description"
+         command="$(find bunker_aubo_description)/scripts/sanitize_urdf_names.py '$(find bunker_aubo_description)/urdf/bunker_aubo.urdf.xacro'"/>
+  <test test-name="combined_description" pkg="bunker_aubo_description"
+        type="test_combined_description.py" time-limit="30"/>
+</launch>

@@ -1,0 +1,39 @@
+brick:
+  length: 0.240
+  width: 0.115
+  height: 0.053
+  orientation_mode: flat
+  mass: 2.5
+grasp:
+  planning_frame: world
+  pre_grasp_height: 0.15
+  lift_height: 0.15
+  # From the unchanged AG95 collision mesh at q=0 (real maximum opening).
+  finger_pad_lower_edge_offset: 0.0156
+  # Physical engagement below the upper side edge of the side-up Brick.
+  finger_pad_contact_overlap: 0.020
+  # Minimum fingertip/TCP clearance above the Brick support plane.
+  surface_clearance: 0.010
+  approach_speed: 0.03
+  cartesian_eef_step: 0.005
+  cartesian_min_fraction: 0.95
+  pose_position_tolerance: 0.010
+  pose_orientation_tolerance: 0.050
+  grasp_along_short_axis: true
+gripper:
+  open_position: 0.0
+  open_tolerance: 0.10
+  closed_position: 0.70
+  closed_threshold: 0.20
+  motion_time: 2.0
+  settle_time: 0.5
+  # Collision-mesh inner-pad gap at the real URDF open limit (q=0).
+  maximum_opening: 0.0952
+  # Unchanged URDF master-joint close limit used for a conservative gap bound.
+  maximum_joint_position: 0.93
+  opening_margin: 0.002
+simulation:
+  use_link_attacher: true
+  attachment_service: /simulation/brick_attachment
+  brick_model: brick
+  minimum_brick_lift: 0.10

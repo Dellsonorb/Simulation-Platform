@@ -1,0 +1,23 @@
+<launch>
+  <arg name="gui" default="true"/>
+  <arg name="paused" default="false"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="paused" value="true"/>
+    <arg name="use_sim_time" value="true"/>
+  </include>
+
+  <param name="robot_description"
+         command="$(find xacro)/xacro --inorder '$(find bunker_aubo_gazebo)/urdf/ag95_only.xacro'"/>
+  <rosparam command="load"
+            file="$(find bunker_aubo_gazebo)/config/ag95_only_controllers.yaml"/>
+  <arg name="unpause" value="$(eval '' if arg('paused') else '-unpause')"/>
+
+  <node name="spawn_ag95" pkg="gazebo_ros" type="spawn_model" output="screen"
+        args="-urdf -param robot_description -model ag95 $(arg unpause)"/>
+  <node name="controller_spawner" pkg="controller_manager" type="spawner"
+        output="screen" args="joint_state_controller gripper_controller"/>
+  <node name="robot_state_publisher" pkg="robot_state_publisher"
+        type="robot_state_publisher" output="screen"/>
+</launch>

@@ -1,0 +1,58 @@
+Panels:
+  - Class: rviz/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: world
+  Displays:
+    - Class: rviz/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 0.5
+    - Class: rviz/TF
+      Name: TF
+      Enabled: true
+      Frame Timeout: 5
+    - Class: rviz/Image
+      Name: P450 RGB
+      Enabled: true
+      Image Topic: /uav1/camera/color/image_raw
+      Transport Hint: raw
+    - Class: rviz/Image
+      Name: Aligned Depth
+      Enabled: true
+      Image Topic: /m1_aerial_brick_pose/aligned_depth_to_color/image_raw
+      Transport Hint: raw
+    - Class: rviz/Image
+      Name: Brick Mask
+      Enabled: true
+      Image Topic: /m1_aerial_brick_pose/brick_mask
+      Transport Hint: raw
+    - Class: rviz/PointCloud2
+      Name: Brick Points
+      Enabled: true
+      Topic: /m1_aerial_brick_pose/brick_points
+      Style: Points
+      Size (Pixels): 4
+      Color Transformer: FlatColor
+      Color: 255; 40; 40
+    - Class: rviz/Marker
+      Name: Brick Pose
+      Enabled: true
+      Marker Topic: /m1_aerial_brick_pose/brick_pose_marker
+  Tools:
+    - Class: rviz/Interact
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Distance: 6
+      Focal Point: 0; 0; 0.8
+      Pitch: 0.45
+      Yaw: 0.75
+Window Geometry:
+  Width: 1400
+  Height: 900

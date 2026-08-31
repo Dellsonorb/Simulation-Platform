@@ -1,0 +1,69 @@
+Panels:
+  - Class: rviz/Displays
+    Name: Displays
+  - Class: rviz/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: world
+    Frame Rate: 30
+  Displays:
+    - Class: rviz/Grid
+      Name: Ground grid
+      Enabled: true
+      Cell Size: 1
+      Plane: XY
+      Plane Cell Count: 10
+      Reference Frame: <Fixed Frame>
+    - Class: rviz/RobotModel
+      Name: Live Robot Model
+      Enabled: true
+      Alpha: 1
+      Collision Enabled: false
+      Robot Description: robot_description
+      TF Prefix: ""
+      Update Interval: 0
+      Visual Enabled: true
+    - Class: moveit_rviz_plugin/MotionPlanning
+      Name: MotionPlanning
+      Enabled: true
+      Move Group Namespace: ""
+      MoveIt_Planning_Attempts: 10
+      MoveIt_Planning_Time: 5
+      Planning Scene Topic: move_group/monitored_planning_scene
+      Robot Description: robot_description
+      Planned Path:
+        Robot Alpha: 0.5
+        Show Robot Collision: false
+        Show Robot Visual: true
+        Trajectory Topic: move_group/display_planned_path
+      Planning Request:
+        Planning Group: manipulator
+        Query Goal State: true
+        Query Start State: false
+      Scene Geometry:
+        Scene Alpha: 1
+        Show Scene Geometry: true
+      Scene Robot:
+        Robot Alpha: 1
+        Show Robot Collision: false
+        Show Robot Visual: true
+  Tools:
+    - Class: rviz/Interact
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Distance: 2.5
+      Focal Point:
+        X: 0.3
+        Y: 0
+        Z: 0.7
+      Pitch: 0.45
+      Yaw: 0.75
+Window Geometry:
+  Height: 900
+  Width: 1440

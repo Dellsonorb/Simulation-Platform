@@ -1,0 +1,10 @@
+<launch>
+  <node name="heading_gate" pkg="bunker_navigation"
+        type="heading_gate_node.py" required="true" output="screen">
+    <rosparam command="load"
+              file="$(find bunker_navigation)/config/costmap_common.yaml"/>
+    <param name="costmap_max_age" value="60.0"/>
+  </node>
+  <test test-name="heading_gate_lifecycle" pkg="bunker_navigation"
+        type="test_heading_gate_lifecycle.py" time-limit="45"/>
+</launch>

@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>bunker_aubo_moveit_config</name>
+  <version>0.1.0</version>
+  <description>MoveIt configuration for the BUNKER AUBO i5 AG95 system.</description>
+  <maintainer email="lu@example.com">lu</maintainer>
+  <license>BSD-3-Clause</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <exec_depend>bunker_aubo_description</exec_depend>
+  <exec_depend>bunker_aubo_gazebo</exec_depend>
+  <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>moveit_ros_move_group</exec_depend>
+  <exec_depend>moveit_fake_controller_manager</exec_depend>
+  <exec_depend>moveit_kinematics</exec_depend>
+  <exec_depend>moveit_planners_ompl</exec_depend>
+  <exec_depend>moveit_ros_visualization</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <test_depend>rostest</test_depend>
+</package>

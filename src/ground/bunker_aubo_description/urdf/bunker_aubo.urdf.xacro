@@ -1,0 +1,150 @@
+<?xml version="1.0"?>
+<robot name="bunker_aubo" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="arm_mount_x" default="0.15"/>
+  <xacro:arg name="arm_mount_y" default="0.0"/>
+  <xacro:arg name="arm_mount_z" default="0.042"/>
+  <xacro:arg name="arm_mount_roll" default="0.0"/>
+  <xacro:arg name="arm_mount_pitch" default="0.0"/>
+  <xacro:arg name="arm_mount_yaw" default="0.0"/>
+  <xacro:arg name="camera_mount_x" default="0.055"/>
+  <xacro:arg name="camera_mount_y" default="0.0"/>
+  <xacro:arg name="camera_mount_z" default="0.075"/>
+  <xacro:arg name="camera_mount_roll" default="0.0"/>
+  <xacro:arg name="camera_mount_pitch" default="0.0"/>
+  <xacro:arg name="camera_mount_yaw" default="0.0"/>
+  <xacro:arg name="camera_enable_rgbd" default="false"/>
+  <xacro:arg name="camera_topic_prefix" default="/camera"/>
+  <xacro:arg name="camera_image_width" default="640"/>
+  <xacro:arg name="camera_image_height" default="480"/>
+  <xacro:arg name="camera_update_rate" default="15.0"/>
+  <xacro:arg name="camera_horizontal_fov" default="1.211259"/>
+  <xacro:arg name="mobile_base" default="false"/>
+  <xacro:arg name="navigation_laser" default="false"/>
+  <xacro:arg name="ag95_effort_coupled" default="false"/>
+  <xacro:arg name="brick_width" default="0.115"/>
+  <xacro:arg name="brick_height" default="0.053"/>
+  <xacro:arg name="brick_orientation_mode" default="flat"/>
+  <xacro:arg name="brick_opening_clearance" default="0.002"/>
+  <xacro:property name="brick_orientation_mode"
+                  value="$(arg brick_orientation_mode)"/>
+  <xacro:property name="brick_grasp_span"
+                  value="${float('$(arg brick_width)') if brick_orientation_mode == 'flat' else float('$(arg brick_height)') if brick_orientation_mode == 'side_up' else 1.0 / 0.0}"/>
+  <xacro:property name="brick_required_opening"
+                  value="${brick_grasp_span + float('$(arg brick_opening_clearance)')}"/>
+
+  <xacro:include filename="$(find bunker_description)/urdf/bunker.urdf.xacro"/>
+  <xacro:include filename="$(find bunker_aubo_description)/urdf/upper_body.xacro"/>
+
+  <xacro:unless value="$(arg mobile_base)">
+    <link name="world"/>
+    <link name="odom"/>
+    <joint name="world_to_odom" type="fixed">
+      <parent link="world"/><child link="odom"/>
+      <!-- Upstream BUNKER base_link is 0.36 m above its track contact plane. -->
+      <origin xyz="0 0 0.36" rpy="0 0 0"/>
+    </joint>
+    <joint name="odom_to_base" type="fixed">
+      <parent link="odom"/><child link="base_link"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+  </xacro:unless>
+
+  <xacro:bunker_aubo_upper_body parent="base_link"
+      arm_x="$(arg arm_mount_x)" arm_y="$(arg arm_mount_y)" arm_z="$(arg arm_mount_z)"
+      arm_roll="$(arg arm_mount_roll)" arm_pitch="$(arg arm_mount_pitch)" arm_yaw="$(arg arm_mount_yaw)"
+      camera_x="$(arg camera_mount_x)" camera_y="$(arg camera_mount_y)" camera_z="$(arg camera_mount_z)"
+      camera_roll="$(arg camera_mount_roll)" camera_pitch="$(arg camera_mount_pitch)" camera_yaw="$(arg camera_mount_yaw)"
+      camera_enable_rgbd="$(arg camera_enable_rgbd)" camera_topic_prefix="$(arg camera_topic_prefix)"
+      camera_image_width="$(arg camera_image_width)" camera_image_height="$(arg camera_image_height)"
+      camera_update_rate="$(arg camera_update_rate)" camera_horizontal_fov="$(arg camera_horizontal_fov)"/>
+
+  <xacro:if value="$(arg navigation_laser)">
+    <link name="navigation_laser_link">
+      <visual>
+        <geometry><cylinder radius="0.035" length="0.040"/></geometry>
+        <material name="navigation_laser_black">
+          <color rgba="0.05 0.05 0.05 1"/>
+        </material>
+      </visual>
+      <inertial>
+        <mass value="0.05"/>
+        <inertia ixx="0.00002" ixy="0" ixz="0"
+                 iyy="0.00002" iyz="0" izz="0.00003"/>
+      </inertial>
+    </link>
+    <joint name="navigation_laser_joint" type="fixed">
+      <parent link="base_link"/><child link="navigation_laser_link"/>
+      <origin xyz="-0.30 0 0.25" rpy="0 0 0"/>
+    </joint>
+    <gazebo reference="navigation_laser_link">
+      <sensor name="navigation_laser" type="ray">
+        <always_on>true</always_on>
+        <update_rate>15.0</update_rate>
+        <visualize>false</visualize>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>720</samples><resolution>1</resolution>
+              <min_angle>-${pi}</min_angle><max_angle>${pi}</max_angle>
+            </horizontal>
+          </scan>
+          <range><min>0.12</min><max>8.0</max><resolution>0.01</resolution></range>
+          <noise><type>gaussian</type><mean>0.0</mean><stddev>0.002</stddev></noise>
+        </ray>
+        <plugin name="navigation_laser_controller" filename="libgazebo_ros_laser.so">
+          <robotNamespace>/</robotNamespace>
+          <topicName>/scan</topicName>
+          <frameName>navigation_laser_link</frameName>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:if>
+
+  <gazebo>
+    <plugin name="gazebo_ros_control" filename="libgazebo_ros_control.so">
+      <robotNamespace>/</robotNamespace><robotParam>/robot_description</robotParam>
+    </plugin>
+    <plugin name="guarded_brick_attachment" filename="libguarded_brick_attachment.so">
+      <serviceName>/simulation/brick_attachment</serviceName>
+      <parentLink>wrist_3_link</parentLink>
+      <brickModel>brick</brickModel>
+      <brickLink>brick_link</brickLink>
+      <gripperJoint>left_outer_knuckle_joint</gripperJoint>
+      <leftFingerPadLink>left_finger_pad</leftFingerPadLink>
+      <rightFingerPadLink>right_finger_pad</rightFingerPadLink>
+      <openThreshold>0.05</openThreshold>
+      <closedThreshold>0.20</closedThreshold>
+      <requiredOpening>${brick_required_opening}</requiredOpening>
+      <maximumOpening>0.0952</maximumOpening>
+      <maximumPenetration>0.003</maximumPenetration>
+      <distanceThreshold>0.35</distanceThreshold>
+      <regionHalfWidth>0.18</regionHalfWidth>
+    </plugin>
+  </gazebo>
+  <xacro:if value="$(arg ag95_effort_coupled)">
+    <gazebo>
+      <plugin name="ag95_effort_coupling"
+              filename="libag95_effort_coupling_plugin.so">
+        <masterJoint>left_outer_knuckle_joint</masterJoint>
+        <passiveJoint>right_outer_knuckle_joint</passiveJoint>
+        <positionGain>20.0</positionGain>
+        <velocityGain>0.1</velocityGain>
+        <maximumEffort>50.0</maximumEffort>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+  <xacro:if value="$(arg mobile_base)">
+    <gazebo>
+      <plugin name="bunker_planar_drive" filename="libbunker_planar_drive_plugin.so">
+        <robotNamespace>/</robotNamespace>
+        <commandTopic>/cmd_vel</commandTopic>
+        <odometryTopic>/odom</odometryTopic>
+        <odometryFrame>odom</odometryFrame>
+        <robotBaseFrame>base_link</robotBaseFrame>
+        <odometryRate>50.0</odometryRate>
+        <handoffCommandTopic>/ground_pick/mobile_manipulation/command</handoffCommandTopic>
+        <handoffStatusTopic>/ground_pick/mobile_manipulation/status</handoffStatusTopic>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+</robot>

@@ -1,0 +1,10 @@
+<launch>
+  <include file="$(find bunker_aubo_gazebo)/launch/combined_robot.launch">
+    <arg name="gui" value="false"/>
+    <arg name="paused" value="true"/>
+    <arg name="mobile_manipulation_startup" value="true"/>
+    <arg name="ag95_effort_coupled" value="true"/>
+  </include>
+  <test test-name="ag95_effort_runtime" pkg="bunker_aubo_gazebo"
+        type="test_ag95_effort_runtime.py" time-limit="100"/>
+</launch>

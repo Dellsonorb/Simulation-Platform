@@ -1,0 +1,15 @@
+<launch>
+  <arg name="gui" default="true"/>
+  <arg name="rviz" default="true"/>
+  <arg name="image_view" default="false"/>
+
+  <include file="$(find brick_rgbd_perception)/launch/perception_demo.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="rviz" value="false"/>
+    <arg name="image_view" value="$(arg image_view)"/>
+  </include>
+  <include file="$(find brick_rgbd_perception)/launch/pose_estimator.launch"/>
+  <node if="$(arg rviz)" name="brick_pose_rviz" pkg="rviz" type="rviz"
+        args="-d $(find brick_rgbd_perception)/rviz/brick_pose.rviz"
+        output="screen"/>
+</launch>

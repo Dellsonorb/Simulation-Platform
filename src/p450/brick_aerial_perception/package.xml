@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>brick_aerial_perception</name>
+  <version>0.1.0</version>
+  <description>M1 P450 RGB-D brick perception simulation.</description>
+
+  <maintainer email="lu@example.com">lu</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>cv_bridge</depend>
+  <depend>gazebo_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>message_filters</depend>
+  <depend>mavros_msgs</depend>
+  <depend>nav_msgs</depend>
+  <exec_depend>prometheus_gazebo</exec_depend>
+  <exec_depend>prometheus_msgs</exec_depend>
+  <exec_depend>prometheus_uav_control</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <depend>rospy</depend>
+  <exec_depend>rviz</exec_depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf</depend>
+  <depend>visualization_msgs</depend>
+
+  <test_depend>python3-numpy</test_depend>
+  <test_depend>rostest</test_depend>
+</package>

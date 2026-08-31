@@ -1,0 +1,11 @@
+<launch>
+  <arg name="start_gazebo" default="false"/>
+  <arg name="gui" default="true"/>
+  <arg name="rviz" default="true"/>
+  <include if="$(arg start_gazebo)" file="$(find bunker_aubo_gazebo)/launch/brick_world.launch">
+    <arg name="gui" value="$(arg gui)"/>
+  </include>
+  <include file="$(find bunker_aubo_moveit_config)/launch/move_group.launch"/>
+  <node if="$(arg rviz)" name="rviz" pkg="rviz" type="rviz"
+        args="-d $(find bunker_aubo_moveit_config)/config/moveit.rviz" output="screen"/>
+</launch>

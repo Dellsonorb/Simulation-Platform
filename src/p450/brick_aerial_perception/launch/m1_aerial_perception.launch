@@ -1,0 +1,61 @@
+<launch>
+  <arg name="uav_id" default="1"/>
+  <arg name="gui" default="true"/>
+  <arg name="rviz_enable" default="true"/>
+  <arg name="autostart" default="true"/>
+  <arg name="require_sampling_state" default="true"/>
+  <arg name="validation_enable" default="false"/>
+  <arg name="validation_output" default="/tmp/m1_validation.json"/>
+  <arg name="world" default="$(find brick_aerial_perception)/worlds/m1_brick.world"/>
+
+  <include file="$(find prometheus_gazebo)/launch_uav_with_sensor/sitl_p450_d435i.launch">
+    <arg name="uav1_id" value="$(arg uav_id)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="rviz_enable" value="false"/>
+    <arg name="world" value="$(arg world)"/>
+    <arg name="uav1_init_x" value="0.0"/>
+    <arg name="uav1_init_y" value="0.0"/>
+    <arg name="uav1_init_yaw" value="0.0"/>
+  </include>
+
+  <include file="$(find prometheus_uav_control)/launch/uav_control_main_outdoor.launch">
+    <arg name="uav_id" value="$(arg uav_id)"/>
+    <arg name="sim_mode" value="true"/>
+    <arg name="joy_enable" value="false"/>
+    <arg name="flag_printf" value="false"/>
+    <arg name="command_xy_vel_max" value="0.6"/>
+    <arg name="px4_xy_vel_max" value="0.8"/>
+  </include>
+
+  <node pkg="brick_aerial_perception" type="world_tf_bridge.py"
+        name="m1_world_tf_bridge" output="screen">
+    <param name="uav_id" value="$(arg uav_id)"/>
+  </node>
+
+  <node pkg="brick_aerial_perception" type="aerial_viewpoint_mission.py"
+        name="m1_aerial_viewpoint_mission" output="screen">
+    <param name="uav_id" value="$(arg uav_id)"/>
+    <param name="autostart" value="$(arg autostart)"/>
+    <rosparam command="load" file="$(find brick_aerial_perception)/config/viewpoints.yaml"/>
+  </node>
+
+  <node pkg="brick_aerial_perception" type="aerial_brick_pose_node.py"
+        name="m1_aerial_brick_pose" output="screen">
+    <param name="uav_id" value="$(arg uav_id)"/>
+    <param name="require_sampling_state" value="$(arg require_sampling_state)"/>
+    <rosparam command="load" file="$(find brick_aerial_perception)/config/perception.yaml"/>
+  </node>
+
+  <node if="$(arg validation_enable)" pkg="brick_aerial_perception"
+        type="m1_validation_monitor.py" name="m1_validation_monitor" output="screen">
+    <param name="uav_id" value="$(arg uav_id)"/>
+    <param name="output_json" value="$(arg validation_output)"/>
+    <rosparam command="load"
+              file="$(find brick_aerial_perception)/config/validation_scenarios.yaml"/>
+  </node>
+
+  <group if="$(arg rviz_enable)">
+    <node pkg="rviz" type="rviz" name="m1_rviz"
+          args="-d $(find brick_aerial_perception)/rviz/m1_aerial_perception.rviz"/>
+  </group>
+</launch>

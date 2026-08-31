@@ -1,0 +1,33 @@
+repositories:
+  bunker_ros:
+    type: git
+    url: https://github.com/agilexrobotics/bunker_ros.git
+    version: 6ae0a1da92a0cdfb5f679e1cf2c0ad63e75a36d1
+  ugv_gazebo_sim:
+    type: git
+    url: https://github.com/agilexrobotics/ugv_gazebo_sim.git
+    version: 27633a956c845903ee630538afeb17fe70afdd84
+  scout_cobot_sim:
+    type: git
+    url: https://github.com/agilexrobotics/scout_cobot_sim.git
+    version: e795e67a2a1a76b06b9647900df04d3aee8e96ab
+  aubo_ros_driver:
+    type: git
+    url: https://github.com/AuboRobot/aubo_ros_driver.git
+    version: 295007ea64ed2313cc34963a5505edc7aa9bf0e4
+  aubo_robot_melodic:
+    type: git
+    url: https://github.com/ian-chuang/aubo_robot.git
+    version: 14f5b9b088be6f4f2a2afca20a68f6f8069f6045
+  LARA_AUBOi5_AG95:
+    type: git
+    url: https://github.com/ian-chuang/LARA_AUBOi5_AG95.git
+    version: 0403d14e7f9cd7f4b2a47e29e9511b2277d2fbb0
+  dh_gripper_ros:
+    type: git
+    url: https://github.com/DH-Robotics/dh_gripper_ros.git
+    version: f59f9c2f4bc8eb116448b1d798791424bf64e337
+  roboticsgroup_gazebo_plugins:
+    type: git
+    url: https://github.com/roboticsgroup/roboticsgroup_gazebo_plugins.git
+    version: 509a32ea6accc58d03cebd9d670ae44635adc924

@@ -1,0 +1,7 @@
+<launch>
+  <arg name="config" default="$(find brick_rgbd_perception)/config/brick_rgbd.yaml"/>
+  <node name="brick_rgbd_perception" pkg="brick_rgbd_perception"
+        type="brick_rgbd_node.py" output="screen">
+    <rosparam command="load" file="$(arg config)"/>
+  </node>
+</launch>

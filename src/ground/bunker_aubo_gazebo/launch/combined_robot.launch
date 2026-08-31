@@ -1,0 +1,74 @@
+<launch>
+  <arg name="gui" default="true"/>
+  <arg name="paused" default="false"/>
+  <arg name="camera_enable_rgbd" default="false"/>
+  <arg name="camera_topic_prefix" default="/camera"/>
+  <arg name="camera_image_width" default="640"/>
+  <arg name="camera_image_height" default="480"/>
+  <arg name="camera_update_rate" default="15.0"/>
+  <arg name="mobile_base" default="false"/>
+  <arg name="navigation_laser" default="false"/>
+  <arg name="spawn_z" default="0.0"/>
+  <arg name="world_name" default="worlds/empty.world"/>
+  <arg name="spawn_controllers" default="true"/>
+  <!-- Startup-only compatibility initialisation.  This is opt-in so the
+       frozen generic/V0.1 launch path retains its original spawn semantics. -->
+  <arg name="mobile_manipulation_startup" default="false"/>
+  <!-- Directed Sim-to-Real audit only: retain real q=0 geometry while an
+       impossible 115 mm target is rejected before gripper actuation. -->
+  <arg name="lock_ag95_open" default="false"/>
+  <!-- Physically actuated reality-check path: passive linkage is driven only
+       by bounded effort; mutually exclusive with lock_ag95_open. -->
+  <arg name="ag95_effort_coupled" default="false"/>
+  <arg name="ag95_master_position_p" default="10.0"/>
+  <arg name="ag95_master_position_d" default="0.1"/>
+  <arg name="brick_width" default="0.115"/>
+  <arg name="brick_height" default="0.053"/>
+  <arg name="brick_orientation_mode" default="flat"/>
+  <arg name="brick_opening_clearance" default="0.002"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(arg world_name)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="paused" value="true"/>
+    <arg name="use_sim_time" value="true"/>
+  </include>
+
+  <param name="robot_description"
+         command="$(find bunker_aubo_description)/scripts/sanitize_urdf_names.py '$(find bunker_aubo_description)/urdf/bunker_aubo.urdf.xacro'
+                  camera_enable_rgbd:=$(arg camera_enable_rgbd)
+                  camera_topic_prefix:=$(arg camera_topic_prefix)
+                  camera_image_width:=$(arg camera_image_width)
+                  camera_image_height:=$(arg camera_image_height)
+                  camera_update_rate:=$(arg camera_update_rate)
+                  mobile_base:=$(arg mobile_base)
+                  navigation_laser:=$(arg navigation_laser)
+                  ag95_effort_coupled:=$(arg ag95_effort_coupled)
+                  brick_width:=$(arg brick_width)
+                  brick_height:=$(arg brick_height)
+                  brick_orientation_mode:=$(arg brick_orientation_mode)
+                  brick_opening_clearance:=$(arg brick_opening_clearance)
+                  lock_ag95_open:=$(arg lock_ag95_open)"/>
+  <rosparam command="load"
+            file="$(find bunker_aubo_gazebo)/config/combined_controllers.yaml"/>
+  <param name="gazebo_ros_control/pid_gains/left_outer_knuckle_joint/p"
+         value="$(arg ag95_master_position_p)"/>
+  <param name="gazebo_ros_control/pid_gains/left_outer_knuckle_joint/d"
+         value="$(arg ag95_master_position_d)"/>
+  <arg name="unpause" value="$(eval '' if arg('paused') else '-unpause')"/>
+
+  <node unless="$(arg mobile_manipulation_startup)"
+        name="spawn_bunker_aubo" pkg="gazebo_ros" type="spawn_model" output="screen"
+        args="-urdf -param robot_description -model bunker_aubo -z $(arg spawn_z) $(arg unpause)"/>
+  <node if="$(arg mobile_manipulation_startup)"
+        name="spawn_bunker_aubo_startup_pose" pkg="gazebo_ros" type="spawn_model" output="screen"
+        args="-urdf -param robot_description -model bunker_aubo -z $(arg spawn_z) $(arg unpause)
+              -J shoulder_pan_joint 0.7040 -J shoulder_lift_joint -0.9584
+              -J elbow_joint 1.7778 -J wrist_1_joint 1.0000
+              -J wrist_2_joint 1.5710 -J wrist_3_joint 0.2038
+              -J left_outer_knuckle_joint 0.0"/>
+  <node if="$(arg spawn_controllers)" name="controller_spawner" pkg="controller_manager" type="spawner"
+        output="screen" args="joint_state_controller arm_controller gripper_controller"/>
+  <node name="robot_state_publisher" pkg="robot_state_publisher"
+        type="robot_state_publisher" output="screen"/>
+</launch>

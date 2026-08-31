@@ -1,0 +1,57 @@
+<launch>
+  <arg name="gui" default="true"/>
+  <arg name="rviz" default="true"/>
+  <arg name="heading_gate_entry_bearing_deg" default="100.0"/>
+  <arg name="heading_gate_release_bearing_deg" default="30.0"/>
+  <arg name="heading_gate_minimum_distance" default="0.5"/>
+  <arg name="heading_gate_angular_gain" default="1.5"/>
+  <arg name="heading_gate_minimum_angular_speed" default="0.25"/>
+  <arg name="heading_gate_maximum_angular_speed" default="0.8"/>
+  <arg name="heading_gate_alignment_timeout" default="15.0"/>
+  <arg name="heading_gate_command_watchdog" default="0.5"/>
+
+  <include file="$(find bunker_aubo_gazebo)/launch/combined_robot.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="camera_enable_rgbd" value="false"/>
+    <arg name="mobile_base" value="true"/>
+    <arg name="navigation_laser" value="true"/>
+    <arg name="spawn_z" value="0.36"/>
+    <arg name="world_name" value="$(find bunker_navigation)/worlds/navigation.world"/>
+    <arg name="spawn_controllers" value="false"/>
+  </include>
+
+  <!-- Navigation treats the complete upper body as a rigid payload. -->
+  <node name="navigation_joint_state_publisher" pkg="joint_state_publisher"
+        type="joint_state_publisher" output="screen"/>
+
+  <node name="heading_gate" pkg="bunker_navigation"
+        type="heading_gate_node.py" required="true" output="screen">
+    <rosparam command="load" file="$(find bunker_navigation)/config/costmap_common.yaml"/>
+    <param name="entry_bearing_deg" value="$(arg heading_gate_entry_bearing_deg)"/>
+    <param name="release_bearing_deg" value="$(arg heading_gate_release_bearing_deg)"/>
+    <param name="minimum_distance" value="$(arg heading_gate_minimum_distance)"/>
+    <param name="angular_gain" value="$(arg heading_gate_angular_gain)"/>
+    <param name="minimum_angular_speed" value="$(arg heading_gate_minimum_angular_speed)"/>
+    <param name="maximum_angular_speed" value="$(arg heading_gate_maximum_angular_speed)"/>
+    <param name="alignment_timeout" value="$(arg heading_gate_alignment_timeout)"/>
+    <param name="command_watchdog" value="$(arg heading_gate_command_watchdog)"/>
+    <param name="costmap_topic" value="/move_base/local_costmap/costmap"/>
+    <param name="costmap_frame" value="odom"/>
+    <param name="costmap_max_age" value="0.75"/>
+    <param name="sweep_angular_step" value="0.025"/>
+    <param name="lethal_cost_threshold" value="100"/>
+  </node>
+
+  <node name="move_base" pkg="move_base" type="move_base" output="screen">
+    <remap from="cmd_vel" to="/navigation/raw_cmd_vel"/>
+    <rosparam command="load" file="$(find bunker_navigation)/config/move_base.yaml"/>
+    <rosparam command="load" file="$(find bunker_navigation)/config/costmap_common.yaml" ns="global_costmap"/>
+    <rosparam command="load" file="$(find bunker_navigation)/config/costmap_common.yaml" ns="local_costmap"/>
+    <rosparam command="load" file="$(find bunker_navigation)/config/global_costmap.yaml"/>
+    <rosparam command="load" file="$(find bunker_navigation)/config/local_costmap.yaml"/>
+    <rosparam command="load" file="$(find bunker_navigation)/config/local_planner.yaml"/>
+  </node>
+
+  <node if="$(arg rviz)" name="bunker_navigation_rviz" pkg="rviz" type="rviz"
+        args="-d $(find bunker_navigation)/rviz/navigation.rviz" output="screen"/>
+</launch>

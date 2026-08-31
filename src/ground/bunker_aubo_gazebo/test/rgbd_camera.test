@@ -1,0 +1,9 @@
+<launch>
+  <include file="$(find bunker_aubo_gazebo)/launch/camera_demo.launch">
+    <arg name="gui" value="false"/>
+    <arg name="image_view" value="false"/>
+    <arg name="move_to_observation" value="true"/>
+  </include>
+  <test test-name="rgbd_camera" pkg="bunker_aubo_gazebo"
+        type="test_rgbd_camera.py" time-limit="120"/>
+</launch>

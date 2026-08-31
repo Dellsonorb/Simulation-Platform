@@ -1,0 +1,101 @@
+<launch>
+  <arg name="gui" default="true"/>
+  <arg name="rviz" default="true"/>
+  <arg name="brick_x" default="2.0"/>
+  <arg name="brick_y" default="0.0"/>
+  <arg name="brick_yaw" default="0.0"/>
+  <arg name="pre_grasp_height" default="0.15"/>
+  <arg name="visual_work_distance" default="0.67"/>
+  <arg name="small_obstacle" default="false"/>
+  <arg name="obstacle_x" default="0.0"/>
+  <arg name="obstacle_y" default="0.0"/>
+  <arg name="lock_ag95_open" default="false"/>
+
+  <param name="/brick_pick_demo/success" value="false"/>
+  <include file="$(find bunker_aubo_gazebo)/launch/combined_robot.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="camera_enable_rgbd" value="true"/>
+    <arg name="mobile_base" value="true"/>
+    <arg name="navigation_laser" value="true"/>
+    <arg name="spawn_controllers" value="true"/>
+    <arg name="mobile_manipulation_startup" value="true"/>
+    <arg name="lock_ag95_open" value="$(arg lock_ag95_open)"/>
+    <arg name="spawn_z" value="0.36"/>
+    <arg name="world_name" value="$(find bunker_navigation)/worlds/navigation.world"/>
+  </include>
+  <param name="ground_pick_brick_description"
+         command="$(find xacro)/xacro --inorder '$(find bunker_aubo_gazebo)/urdf/brick.urdf.xacro'"/>
+  <node name="spawn_ground_pick_brick" pkg="gazebo_ros" type="spawn_model"
+        output="screen"
+        args="-urdf -param ground_pick_brick_description -model brick
+              -x $(arg brick_x) -y $(arg brick_y) -z 0.0265 -Y $(arg brick_yaw)"/>
+  <node if="$(arg small_obstacle)" name="spawn_ground_pick_obstacle"
+        pkg="gazebo_ros" type="spawn_model" output="screen"
+        args="-sdf -file $(find bunker_navigation)/models/approach_obstacle.sdf
+              -model approach_obstacle -x $(arg obstacle_x)
+              -y $(arg obstacle_y) -z 0.50"/>
+
+  <node name="heading_gate" pkg="bunker_navigation"
+        type="heading_gate_node.py" required="true" output="screen">
+    <rosparam command="load" file="$(find bunker_navigation)/config/costmap_common.yaml"/>
+    <param name="costmap_topic" value="/move_base/local_costmap/costmap"/>
+    <param name="costmap_frame" value="odom"/>
+    <param name="costmap_max_age" value="0.75"/>
+    <param name="sweep_angular_step" value="0.025"/>
+    <param name="lethal_cost_threshold" value="100"/>
+  </node>
+
+  <node name="move_base" pkg="move_base" type="move_base" output="screen">
+    <remap from="cmd_vel" to="/navigation/raw_cmd_vel"/>
+    <rosparam command="load" file="$(find bunker_navigation)/config/move_base.yaml"/>
+    <rosparam command="load" file="$(find bunker_navigation)/config/costmap_common.yaml" ns="global_costmap"/>
+    <rosparam command="load" file="$(find bunker_navigation)/config/costmap_common.yaml" ns="local_costmap"/>
+    <rosparam command="load" file="$(find bunker_navigation)/config/global_costmap.yaml"/>
+    <rosparam command="load" file="$(find bunker_navigation)/config/local_costmap.yaml"/>
+    <rosparam command="load" file="$(find bunker_navigation)/config/local_planner.yaml"/>
+  </node>
+
+  <node name="approach_pose_generator" pkg="bunker_navigation"
+        type="approach_pose_node.py" required="true" output="screen">
+    <rosparam command="load" file="$(find bunker_navigation)/config/approach_pose.yaml"/>
+    <param name="work_distance" value="$(arg visual_work_distance)"/>
+    <param name="reach_min" value="0.64"/>
+  </node>
+
+  <include file="$(find bunker_aubo_moveit_config)/launch/moveit_planning_execution.launch">
+    <arg name="start_gazebo" value="false"/>
+    <arg name="rviz" value="false"/>
+  </include>
+  <include file="$(find brick_rgbd_perception)/launch/perception.launch"/>
+  <include file="$(find brick_rgbd_perception)/launch/pose_estimator.launch"/>
+
+  <rosparam command="load" file="$(find brick_pick_demo)/config/grasp.yaml"
+            ns="brick_pick_node"/>
+  <param name="brick_pick_node/grasp/planning_frame" value="aubo_i5_base_link"/>
+  <param name="brick_pick_node/grasp/pre_grasp_height" value="$(arg pre_grasp_height)"/>
+  <node name="brick_pick_node" pkg="brick_pick_demo" type="brick_pick_node"
+        output="screen" required="true">
+    <remap from="/brick_pose" to="/ground_pick/approved_brick_pose"/>
+  </node>
+
+  <rosparam command="load" file="$(find brick_visual_pick)/config/pose_gate.yaml"
+            ns="ground_pick_refine_gate"/>
+  <rosparam command="load" file="$(find bunker_aubo_gazebo)/config/camera_observation.yaml"
+            ns="ground_pick_refine_gate"/>
+  <param name="ground_pick_refine_gate/output_topic"
+         value="/ground_pick/refined_brick_pose"/>
+  <param name="ground_pick_refine_gate/status_topic"
+         value="/ground_pick/refine_status"/>
+  <rosparam command="load" file="$(find bunker_aubo_gazebo)/config/camera_observation.yaml"
+            ns="ground_pick_observation"/>
+
+  <node name="ground_pick_orchestrator" pkg="ground_pick_orchestrator"
+        type="ground_pick_node.py" output="screen" required="true">
+    <rosparam command="load"
+              file="$(find ground_pick_orchestrator)/config/mission.yaml"/>
+  </node>
+
+  <node if="$(arg rviz)" name="ground_pick_rviz" pkg="rviz" type="rviz"
+        args="-d $(find bunker_navigation)/rviz/navigation.rviz"
+        output="screen"/>
+</launch>

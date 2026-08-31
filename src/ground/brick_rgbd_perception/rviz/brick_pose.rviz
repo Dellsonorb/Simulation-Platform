@@ -1,0 +1,50 @@
+Panels:
+  - Class: rviz/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz/Grid
+      Enabled: true
+      Name: Grid
+      Plane: XY
+      Cell Size: 0.1
+    - Class: rviz/PointCloud2
+      Enabled: true
+      Name: Brick PointCloud
+      Topic: /brick_rgbd_perception/points
+      Queue Size: 2
+      Style: Flat Squares
+      Size (Pixels): 3
+      Size (m): 0.004
+      Color Transformer: FlatColor
+      Color: 255; 45; 20
+      Position Transformer: XYZ
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Name: Estimated Center and Long Axis
+      Marker Topic: /brick_pose_estimator/markers
+      Queue Size: 10
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: aubo_i5_base_link
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz/Interact
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Distance: 0.65
+      Focal Point:
+        X: 0.65
+        Y: 0.0
+        Z: -0.44
+      Pitch: 0.55
+      Yaw: 3.14
+Window Geometry:
+  Height: 900
+  Width: 1400

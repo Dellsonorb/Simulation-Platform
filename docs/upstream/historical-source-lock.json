@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "publication_date": "2026-08-20",
+  "p450": {
+    "upstream": "https://gitee.com/amovlab/Prometheus.git",
+    "branch": "feature/final-simulation-readiness",
+    "commit": "c4ad8f94349cd42c4bd3d7b4ea1151857b17b5f2",
+    "tree": "00cf3ba8806a15006f02e49b3b896439b340b8de",
+    "runtime_acceptance_commit": "87ea5ad6868eb9a3805ac900c62820b282e5e6c9",
+    "runtime_source_sha256": "e696b7740e0637424ce5a8827831755f2b3944e2dbfb417227cda8329ac667d5"
+  },
+  "ground": {
+    "local_authority_commit": "72bea5be3a5d7944ee7413ca2bdcdab51baf6400",
+    "local_authority_tree": "927472c56bf2d4772f20298fe1a9f0277097edcf",
+    "commit": "e3db0f95b9f827c1862d04555e575f5db3711b41",
+    "tree": "011478e073ddb40f79158188c070582bb1c28fba",
+    "selected_source_sha256": "c71f64c655749130ffe0390d1561a8b048269d5fa894e53a937fc2762d0e2bdd"
+  },
+  "px4": {
+    "upstream": "https://gitee.com/amovlab/prometheus_px4.git",
+    "commit": "713814f4eea5990e49dd776a38a36ad53e171f60",
+    "sitl_gazebo_commit": "9566172e7c0760f66681304b963d675c5b120daf",
+    "vendored": false
+  },
+  "accepted_environment": {
+    "ubuntu": "20.04",
+    "ros": "noetic",
+    "gazebo": "11.15.1-1~focal",
+    "moveit": "1.1.16-1focal.20250521.021831"
+  },
+  "target_repository": "https://github.com/Dellsonorb/P450-SIM.git"
+}

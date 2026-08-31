@@ -1,0 +1,12 @@
+estimate_topic: /brick_pose_estimator/pose_debug
+output_topic: /brick_pose
+status_topic: /visual_pick/status
+required_frame: aubo_i5_base_link
+required_samples: 6
+minimum_sample_span: 0.30
+position_stability_tolerance: 0.003
+yaw_stability_tolerance: 0.02
+observation_joint_tolerance: 0.08
+observation_timeout: 35.0
+perception_timeout: 15.0
+estimate_max_age: 1.0

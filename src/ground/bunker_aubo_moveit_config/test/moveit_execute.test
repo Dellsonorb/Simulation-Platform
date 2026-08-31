@@ -1,0 +1,8 @@
+<launch>
+  <include file="$(find bunker_aubo_gazebo)/launch/combined_robot.launch">
+    <arg name="gui" value="false"/>
+  </include>
+  <include file="$(find bunker_aubo_moveit_config)/launch/move_group.launch"/>
+  <test test-name="moveit_execute" pkg="bunker_aubo_moveit_config"
+        type="test_moveit_execute.py" time-limit="120"/>
+</launch>

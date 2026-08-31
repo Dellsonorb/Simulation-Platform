@@ -1,0 +1,18 @@
+<launch>
+  <arg name="gui" default="true"/>
+  <arg name="paused" default="false"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="paused" value="$(arg paused)"/>
+    <arg name="use_sim_time" value="true"/>
+  </include>
+
+  <!-- V0.1 deliberately keeps the base static; navigation is out of scope. -->
+  <param name="robot_description"
+         command="$(find xacro)/xacro --inorder '$(find bunker_aubo_gazebo)/urdf/bunker_static.xacro'"/>
+  <node name="spawn_bunker" pkg="gazebo_ros" type="spawn_model" output="screen"
+        args="-urdf -param robot_description -model bunker -z 0.36"/>
+  <node name="robot_state_publisher" pkg="robot_state_publisher"
+        type="robot_state_publisher" output="screen"/>
+</launch>

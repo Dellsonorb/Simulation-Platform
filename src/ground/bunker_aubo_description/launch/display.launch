@@ -1,0 +1,6 @@
+<launch>
+  <param name="robot_description"
+         command="$(find bunker_aubo_description)/scripts/sanitize_urdf_names.py '$(find bunker_aubo_description)/urdf/bunker_aubo.urdf.xacro'"/>
+  <node name="robot_state_publisher" pkg="robot_state_publisher"
+        type="robot_state_publisher"/>
+</launch>

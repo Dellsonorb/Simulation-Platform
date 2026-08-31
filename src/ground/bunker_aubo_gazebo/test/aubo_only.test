@@ -1,0 +1,7 @@
+<launch>
+  <include file="$(find bunker_aubo_gazebo)/launch/aubo_only.launch">
+    <arg name="gui" value="false"/>
+  </include>
+  <test test-name="aubo_controller" pkg="bunker_aubo_gazebo"
+        type="test_aubo_controller.py" time-limit="75"/>
+</launch>

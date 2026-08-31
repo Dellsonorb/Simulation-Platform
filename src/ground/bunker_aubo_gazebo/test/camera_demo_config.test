@@ -1,0 +1,4 @@
+<launch>
+  <test test-name="camera_demo_config" pkg="bunker_aubo_gazebo"
+        type="test_camera_demo_config.py" time-limit="30"/>
+</launch>

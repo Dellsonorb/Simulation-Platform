@@ -1,0 +1,20 @@
+joint_state_controller:
+  type: joint_state_controller/JointStateController
+  publish_rate: 100
+
+gripper_controller:
+  type: position_controllers/JointTrajectoryController
+  joints:
+    - left_outer_knuckle_joint
+  constraints:
+    goal_time: 1.0
+    stopped_velocity_tolerance: 0.05
+    left_outer_knuckle_joint: {trajectory: 0.12, goal: 0.08}
+  stop_trajectory_duration: 0.3
+  state_publish_rate: 100
+  action_monitor_rate: 20
+
+gazebo_ros_control:
+  pid_gains:
+    left_outer_knuckle_joint: {p: 10.0, i: 1.0, d: 0.1, i_clamp: 1.0}
+    right_outer_knuckle_joint: {p: 20.0, i: 1.0, d: 0.1, i_clamp: 1.0}

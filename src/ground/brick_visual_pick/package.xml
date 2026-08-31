@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>brick_visual_pick</name>
+  <version>0.1.0</version>
+  <description>Quality-gated integration of RGB-D brick perception and V0.1 picking.</description>
+  <maintainer email="lu@example.com">lu</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>geometry_msgs</build_depend>
+  <build_depend>rospy</build_depend>
+  <build_depend>sensor_msgs</build_depend>
+  <build_depend>std_msgs</build_depend>
+
+  <exec_depend>brick_pick_demo</exec_depend>
+  <exec_depend>brick_rgbd_perception</exec_depend>
+  <exec_depend>bunker_aubo_gazebo</exec_depend>
+  <exec_depend>bunker_aubo_moveit_config</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>gazebo_msgs</exec_depend>
+  <exec_depend>python-yaml</exec_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>rosgraph_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>tf</exec_depend>
+
+  <test_depend>python-yaml</test_depend>
+  <test_depend>rostest</test_depend>
+</package>

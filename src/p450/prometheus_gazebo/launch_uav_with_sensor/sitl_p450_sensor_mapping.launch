@@ -1,0 +1,27 @@
+<launch>
+  <arg name="uav_id" default="1"/>
+  <arg name="gui" default="false"/>
+  <arg name="rviz_enable" default="false"/>
+  <arg name="world" default="$(find prometheus_gazebo)/gazebo_worlds/planning_worlds/planning_easy.world"/>
+  <arg name="pcd_save_en" default="false"/>
+  <arg name="pcd_save_path" default="$(env HOME)/.ros/fast_lio_map.pcd"/>
+
+  <include file="$(find prometheus_gazebo)/launch_uav_with_sensor/sitl_p450_d435i_mid360.launch">
+    <arg name="uav1_id" value="$(arg uav_id)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="rviz_enable" value="$(arg rviz_enable)"/>
+    <arg name="world" value="$(arg world)"/>
+  </include>
+
+  <include file="$(find fast_lio)/launch/mapping_mid360_gazebo.launch">
+    <arg name="uav_id" value="$(arg uav_id)"/>
+    <arg name="pcd_save_en" value="$(arg pcd_save_en)"/>
+    <arg name="pcd_save_path" value="$(arg pcd_save_path)"/>
+  </include>
+  <include file="$(find prometheus_gazebo)/launch_uav_with_sensor/depth_to_octomap.launch">
+    <arg name="uav_id" value="$(arg uav_id)"/>
+  </include>
+  <include file="$(find prometheus_gazebo)/launch_uav_with_sensor/mid360_to_octomap.launch">
+    <arg name="uav_id" value="$(arg uav_id)"/>
+  </include>
+</launch>

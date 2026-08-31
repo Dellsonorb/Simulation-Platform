@@ -1,0 +1,19 @@
+<launch>
+  <arg name="gui" default="true"/>
+  <arg name="rviz" default="true"/>
+
+  <include file="$(find bunker_navigation)/launch/navigation_demo.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="rviz" value="false"/>
+  </include>
+
+  <node name="approach_pose_generator" pkg="bunker_navigation"
+        type="approach_pose_node.py" required="true" output="screen">
+    <rosparam command="load"
+              file="$(find bunker_navigation)/config/approach_pose.yaml"/>
+  </node>
+
+  <node if="$(arg rviz)" name="approach_pose_rviz" pkg="rviz" type="rviz"
+        args="-d $(find bunker_navigation)/rviz/navigation.rviz"
+        output="screen"/>
+</launch>

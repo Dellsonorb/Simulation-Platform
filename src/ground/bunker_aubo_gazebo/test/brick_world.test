@@ -1,0 +1,10 @@
+<launch>
+  <include file="$(find bunker_aubo_gazebo)/launch/brick_world.launch">
+    <arg name="gui" value="false"/>
+    <arg name="brick_x" value="0.75"/>
+    <arg name="brick_y" value="0.10"/>
+    <arg name="brick_yaw" value="0.30"/>
+  </include>
+  <test test-name="brick_world" pkg="bunker_aubo_gazebo"
+        type="test_brick_world.py" time-limit="75"/>
+</launch>

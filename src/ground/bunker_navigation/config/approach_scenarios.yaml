@@ -1,0 +1,12 @@
+scenarios:
+  - {id: front_center, brick_x: 2.00, brick_y: 0.00, brick_yaw: 0.000000, expect_generation: true}
+  - {id: front_left_yaw45, brick_x: 2.00, brick_y: 0.65, brick_yaw: 0.785398, expect_generation: true}
+  - {id: front_right_yaw90, brick_x: 2.00, brick_y: -0.65, brick_yaw: 1.570796, expect_generation: true}
+  - {id: left_workspace, brick_x: 1.50, brick_y: 1.50, brick_yaw: 1.200000, expect_generation: true}
+  - {id: right_workspace, brick_x: 1.50, brick_y: -1.50, brick_yaw: -1.200000, expect_generation: true}
+  - {id: far_oblique, brick_x: 3.00, brick_y: 0.50, brick_yaw: 2.200000, expect_generation: true}
+  - {id: rear_gate, brick_x: -1.80, brick_y: 0.00, brick_yaw: 0.000000, expect_generation: true}
+  - {id: rear_left_gate, brick_x: -1.80, brick_y: 0.80, brick_yaw: 1.000000, expect_generation: true}
+  - {id: side_left, brick_x: 0.00, brick_y: 2.00, brick_yaw: 1.570796, expect_generation: true}
+  - {id: preferred_blocked_fallback, brick_x: 2.00, brick_y: 0.00, brick_yaw: 1.570796, expect_generation: true, small_obstacle: true, obstacle_x: 1.03, obstacle_y: 0.45}
+  - {id: outside_costmap_rejection, brick_x: 8.00, brick_y: 0.00, brick_yaw: 0.000000, expect_generation: false}

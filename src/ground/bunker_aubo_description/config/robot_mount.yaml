@@ -1,0 +1,16 @@
+arm_mount:
+  x: 0.15
+  y: 0.0
+  # 80 mm mount cylinder center: bottom at z=0.002 m, on the BUNKER deck.
+  z: 0.042
+  roll: 0.0
+  pitch: 0.0
+  yaw: 0.0
+
+camera_mount:
+  x: 0.055
+  y: 0.0
+  z: 0.075
+  roll: 0.0
+  pitch: 0.0
+  yaw: 0.0

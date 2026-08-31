@@ -1,0 +1,40 @@
+<launch>
+  <arg name="gui" default="true"/>
+  <arg name="publish_manual_pose" default="true"/>
+  <arg name="brick_x" default="0.75"/>
+  <arg name="brick_y" default="0.0"/>
+  <arg name="brick_yaw" default="0.0"/>
+  <arg name="brick_length" default="0.240"/>
+  <arg name="brick_width" default="0.115"/>
+  <arg name="brick_height" default="0.053"/>
+  <arg name="brick_orientation_mode" default="flat"/>
+  <arg name="brick_z"
+       default="$(eval 0.5 * float(arg('brick_height')) if arg('brick_orientation_mode') == 'flat' else 0.5 * float(arg('brick_width')))"/>
+  <arg name="mobile_manipulation_startup" default="false"/>
+  <arg name="ag95_effort_coupled" default="false"/>
+  <arg name="gripper_motion_time" default="2.0"/>
+  <include file="$(find bunker_aubo_gazebo)/launch/brick_world.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="brick_x" value="$(arg brick_x)"/>
+    <arg name="brick_y" value="$(arg brick_y)"/>
+    <arg name="brick_z" value="$(arg brick_z)"/>
+    <arg name="brick_yaw" value="$(arg brick_yaw)"/>
+    <arg name="brick_length" value="$(arg brick_length)"/>
+    <arg name="brick_width" value="$(arg brick_width)"/>
+    <arg name="brick_height" value="$(arg brick_height)"/>
+    <arg name="brick_orientation_mode" value="$(arg brick_orientation_mode)"/>
+    <arg name="mobile_manipulation_startup"
+         value="$(arg mobile_manipulation_startup)"/>
+    <arg name="ag95_effort_coupled" value="$(arg ag95_effort_coupled)"/>
+  </include>
+  <include file="$(find bunker_aubo_moveit_config)/launch/move_group.launch"/>
+  <include file="$(find brick_pick_demo)/launch/brick_pick.launch">
+    <arg name="brick_orientation_mode" value="$(arg brick_orientation_mode)"/>
+    <arg name="gripper_motion_time" value="$(arg gripper_motion_time)"/>
+  </include>
+  <node if="$(arg publish_manual_pose)" name="manual_brick_pose_publisher"
+        pkg="brick_pick_demo" type="manual_brick_pose_publisher.py" output="screen">
+    <param name="x" value="$(arg brick_x)"/><param name="y" value="$(arg brick_y)"/>
+    <param name="z" value="$(arg brick_z)"/><param name="yaw" value="$(arg brick_yaw)"/>
+  </node>
+</launch>

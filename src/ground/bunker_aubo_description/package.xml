@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>bunker_aubo_description</name>
+  <version>0.1.0</version>
+  <description>Parameterized BUNKER, AUBO i5, AG95 and D435 robot description.</description>
+  <maintainer email="lu@example.com">lu</maintainer>
+  <license>BSD-3-Clause</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <exec_depend>aubo_description</exec_depend>
+  <exec_depend>bunker_description</exec_depend>
+  <exec_depend>dh_ag95_description</exec_depend>
+  <exec_depend>gazebo_plugins</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>urdf</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <test_depend>rostest</test_depend>
+  <test_depend>rospkg</test_depend>
+</package>

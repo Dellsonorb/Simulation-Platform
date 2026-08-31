@@ -1,0 +1,15 @@
+<launch>
+  <arg name="config" default="$(find brick_rgbd_perception)/config/brick_pose_estimator.yaml"/>
+  <arg name="brick_length" default="0.240"/>
+  <arg name="brick_width" default="0.115"/>
+  <arg name="brick_height" default="0.053"/>
+  <arg name="brick_orientation_mode" default="flat"/>
+  <node name="brick_pose_estimator" pkg="brick_rgbd_perception"
+        type="brick_pose_estimator.py" output="screen">
+    <rosparam command="load" file="$(arg config)"/>
+    <param name="brick_length" value="$(arg brick_length)"/>
+    <param name="brick_width" value="$(arg brick_width)"/>
+    <param name="brick_height" value="$(arg brick_height)"/>
+    <param name="brick_orientation_mode" value="$(arg brick_orientation_mode)"/>
+  </node>
+</launch>

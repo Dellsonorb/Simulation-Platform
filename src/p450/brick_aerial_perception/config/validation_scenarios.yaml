@@ -1,0 +1,17 @@
+validation_scenarios:
+  - id: center_origin_yaw0
+    viewpoint: center_low
+    brick_position: [0.00, 0.00, 0.0265]
+    brick_yaw: 0.0
+  - id: left_offset_yaw20
+    viewpoint: left_low
+    brick_position: [0.08, 0.12, 0.0265]
+    brick_yaw: 0.349066
+  - id: right_offset_yaw_minus20
+    viewpoint: right_low
+    brick_position: [-0.10, -0.12, 0.0265]
+    brick_yaw: -0.349066
+  - id: high_offset_yaw65
+    viewpoint: center_high
+    brick_position: [0.12, -0.04, 0.0265]
+    brick_yaw: 1.134464

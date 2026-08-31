@@ -1,0 +1,21 @@
+cloud_topic: /brick_rgbd_perception/points
+camera_info_topic: /camera/depth/camera_info
+target_frame: aubo_i5_base_link
+
+brick_length: 0.240
+brick_width: 0.115
+brick_height: 0.053
+brick_orientation_mode: flat
+top_surface_tolerance: 0.008
+min_top_points: 100
+min_cloud_points: 60000
+# The historical 60k gate is calibrated for the flat 0.240 x 0.115 top.
+# Other physical orientations scale this minimum by exposed top area.
+min_cloud_points_reference_top_area: 0.0276
+min_pca_ratio: 1.5
+min_dimension_coverage: 0.5
+max_dimension_ratio: 1.25
+tf_timeout: 0.10
+image_border_margin: 2.0
+info_sync_queue_size: 10
+info_sync_slop: 0.04

@@ -1,0 +1,7 @@
+<launch>
+  <include file="$(find bunker_aubo_gazebo)/launch/bunker_only.launch">
+    <arg name="gui" value="false"/>
+  </include>
+  <test test-name="bunker_spawn" pkg="bunker_aubo_gazebo"
+        type="test_bunker_spawn.py" time-limit="60"/>
+</launch>

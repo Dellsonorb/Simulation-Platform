@@ -1,0 +1,23 @@
+<launch>
+  <arg name="result_file" default="/tmp/rear_obstacle_safety.json"/>
+  <arg name="obstacle_y" default="0.58"/>
+  <arg name="expect_blocked" default="true"/>
+
+  <include file="$(find bunker_navigation)/launch/navigation_demo.launch">
+    <arg name="gui" value="false"/>
+    <arg name="rviz" value="false"/>
+  </include>
+
+  <param name="rear_gate_obstacle_description"
+         textfile="$(find bunker_navigation)/models/rear_gate_obstacle.sdf"/>
+  <node name="spawn_rear_gate_obstacle" pkg="gazebo_ros" type="spawn_model"
+        args="-sdf -param rear_gate_obstacle_description -model rear_gate_obstacle -x 0.0 -y $(arg obstacle_y) -z 0.50"
+        output="screen"/>
+
+  <node name="rear_obstacle_safety_probe" pkg="bunker_navigation"
+        type="probe_rear_obstacle_safety.py" required="true" output="screen">
+    <param name="result_file" value="$(arg result_file)"/>
+    <param name="obstacle_y" value="$(arg obstacle_y)"/>
+    <param name="expect_blocked" value="$(arg expect_blocked)"/>
+  </node>
+</launch>

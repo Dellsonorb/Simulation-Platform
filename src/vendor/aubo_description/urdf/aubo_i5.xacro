@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro"
+  name="aubo_i5">
+  <!-- ur5 -->
+  <xacro:include filename="$(find aubo_description)/urdf/aubo_i5_macro.xacro" />
+
+  <link name="world" />
+
+  <!-- arm -->
+  <xacro:aubo_i5
+    prefix=""
+    parent="world"
+    hw_interface="hardware_interface/PositionJointInterface"
+  >
+    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+  </xacro:aubo_i5>
+
+  <link name="teleop_link" />
+  <joint name="teleop_link_joint" type="fixed">
+    <parent link="ee_link" />
+    <child link="teleop_link" />
+    <origin rpy="${-pi/2} 0 ${-pi/2}" xyz="0 0 0" />
+  </joint>
+
+  <gazebo>
+    <plugin name="ros_control" filename="libgazebo_ros_control.so"></plugin>
+  </gazebo>
+
+</robot>

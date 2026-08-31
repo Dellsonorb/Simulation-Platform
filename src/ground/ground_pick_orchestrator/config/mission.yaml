@@ -1,0 +1,41 @@
+input_topic: /ground_pick/known_brick_pose
+approach_input_topic: /known_brick_pose
+approach_status_topic: /bunker/approach_status
+refine_output_topic: /ground_pick/refined_brick_pose
+refine_status_topic: /ground_pick/refine_status
+formal_pose_topic: /brick_pose
+approved_pose_topic: /ground_pick/approved_brick_pose
+status_topic: /ground_pick/status
+required_pose_frame: aubo_i5_base_link
+linear_stop_threshold: 0.01
+angular_stop_threshold: 0.02
+stop_settle_time: 1.0
+navigation_timeout: 100.0
+stop_timeout: 8.0
+observation_timeout: 30.0
+perception_timeout: 20.0
+pick_timeout: 90.0
+mission_timeout: 190.0
+minimum_lift: 0.10
+lift_verify_delay: 1.0
+observation_duration: 5.0
+observation_planning_time: 6.0
+observation_planning_attempts: 5
+observation_velocity_scaling: 0.20
+observation_acceleration_scaling: 0.20
+observation_plan_endpoint_tolerance: 0.01
+observation_trajectory_timeout_margin: 5.0
+observation_ground_frame: aubo_i5_base_link
+# The guard starts 0.40 m forward of the arm base, so the BUNKER footprint
+# may rest on the real Gazebo ground while the manipulation workspace is
+# collision checked against that same ground height.
+observation_ground_center: [2.0, 0.0, -0.532]
+observation_ground_size: [3.2, 4.0, 0.10]
+observation_goal_tolerance: 0.08
+observation_position_delta_tolerance: 0.005
+observation_settle_duration: 0.5
+mobile_handoff_timeout: 8.0
+controller_start_timeout: 15.0
+mobile_handoff_command_topic: /ground_pick/mobile_manipulation/command
+mobile_handoff_status_topic: /ground_pick/mobile_manipulation/status
+brick_model: brick

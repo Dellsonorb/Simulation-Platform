@@ -1,0 +1,41 @@
+<launch>
+  <arg name="scenario_id"/>
+  <arg name="brick_x"/>
+  <arg name="brick_y"/>
+  <arg name="brick_yaw"/>
+  <arg name="expect_generation"/>
+  <arg name="result_file"/>
+  <arg name="small_obstacle" default="false"/>
+  <arg name="obstacle_x" default="0.0"/>
+  <arg name="obstacle_y" default="0.0"/>
+  <arg name="timeout" default="100.0"/>
+
+  <include file="$(find bunker_navigation)/launch/approach_pose_demo.launch">
+    <arg name="gui" value="false"/>
+    <arg name="rviz" value="false"/>
+  </include>
+
+  <param name="approach_brick_description"
+         command="$(find xacro)/xacro --inorder '$(find bunker_aubo_gazebo)/urdf/brick.urdf.xacro'"/>
+  <node name="spawn_approach_brick" pkg="gazebo_ros" type="spawn_model"
+        output="screen"
+        args="-urdf -param approach_brick_description -model brick
+              -x $(arg brick_x) -y $(arg brick_y) -z 0.0265 -Y $(arg brick_yaw)"/>
+
+  <node if="$(arg small_obstacle)" name="spawn_approach_obstacle"
+        pkg="gazebo_ros" type="spawn_model" output="screen"
+        args="-sdf -file $(find bunker_navigation)/models/approach_obstacle.sdf
+              -model approach_obstacle -x $(arg obstacle_x)
+              -y $(arg obstacle_y) -z 0.50"/>
+  <node name="approach_trial_monitor" pkg="bunker_navigation"
+        type="approach_trial_monitor.py" required="true" output="screen">
+    <param name="scenario_id" value="$(arg scenario_id)"/>
+    <param name="expect_generation" value="$(arg expect_generation)"/>
+    <param name="small_obstacle" value="$(arg small_obstacle)"/>
+    <param name="result_file" value="$(arg result_file)"/>
+    <param name="timeout" value="$(arg timeout)"/>
+    <param name="work_distance" value="0.82"/>
+    <param name="arm_offset_x" value="0.15"/>
+    <param name="arm_offset_y" value="0.0"/>
+  </node>
+</launch>

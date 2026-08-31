@@ -1,0 +1,17 @@
+color_topic: /camera/color/image_raw
+depth_topic: /camera/depth/image_rect_raw
+color_info_topic: /camera/color/camera_info
+depth_info_topic: /camera/depth/camera_info
+sync_queue_size: 10
+sync_slop: 0.04
+
+# Gazebo/Red HSV ranges (OpenCV hue scale: 0..179).
+hue_ranges: [[0, 10], [170, 179]]
+saturation_min: 100
+value_min: 40
+morphology_kernel: 3
+min_component_pixels: 100
+
+min_depth: 0.15
+max_depth: 2.0
+pixel_stride: 1

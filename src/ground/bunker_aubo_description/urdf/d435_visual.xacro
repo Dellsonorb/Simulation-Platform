@@ -1,0 +1,103 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="d435_visual" params="
+      parent x y z roll pitch yaw
+      enable_rgbd topic_prefix image_width image_height update_rate horizontal_fov">
+    <link name="d435_mount_link"/>
+    <joint name="d435_mount_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child link="d435_mount_link"/>
+      <origin xyz="${x} ${y} ${z}" rpy="${roll} ${pitch} ${yaw}"/>
+    </joint>
+
+    <link name="camera_link">
+      <inertial>
+        <mass value="0.072"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <inertia ixx="0.00004" ixy="0" ixz="0"
+                 iyy="0.00012" iyz="0" izz="0.00013"/>
+      </inertial>
+      <visual>
+        <geometry><box size="0.09 0.025 0.025"/></geometry>
+        <material name="d435_gray"><color rgba="0.25 0.25 0.25 1"/></material>
+      </visual>
+      <collision><geometry><box size="0.09 0.025 0.025"/></geometry></collision>
+    </link>
+    <joint name="camera_joint" type="fixed">
+      <parent link="d435_mount_link"/>
+      <child link="camera_link"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="camera_color_optical_frame"/>
+    <joint name="camera_color_optical_joint" type="fixed">
+      <parent link="camera_link"/>
+      <child link="camera_color_optical_frame"/>
+      <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+    </joint>
+    <link name="camera_depth_optical_frame"/>
+    <joint name="camera_depth_optical_joint" type="fixed">
+      <parent link="camera_link"/>
+      <child link="camera_depth_optical_frame"/>
+      <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+    </joint>
+
+    <xacro:if value="${enable_rgbd}">
+      <gazebo reference="camera_link">
+        <sensor name="d435_color" type="camera">
+          <always_on>true</always_on>
+          <update_rate>${update_rate}</update_rate>
+          <visualize>true</visualize>
+          <camera name="d435_color_camera">
+            <horizontal_fov>${horizontal_fov}</horizontal_fov>
+            <image>
+              <width>${image_width}</width>
+              <height>${image_height}</height>
+              <format>R8G8B8</format>
+            </image>
+            <clip><near>0.10</near><far>10.0</far></clip>
+          </camera>
+          <plugin name="d435_color_controller" filename="libgazebo_ros_camera.so">
+            <robotNamespace>/</robotNamespace>
+            <alwaysOn>true</alwaysOn>
+            <cameraName>d435_color</cameraName>
+            <imageTopicName>${topic_prefix}/color/image_raw</imageTopicName>
+            <cameraInfoTopicName>${topic_prefix}/color/camera_info</cameraInfoTopicName>
+            <frameName>camera_color_optical_frame</frameName>
+            <updateRate>0.0</updateRate>
+          </plugin>
+        </sensor>
+
+        <sensor name="d435_depth" type="depth">
+          <always_on>true</always_on>
+          <update_rate>${update_rate}</update_rate>
+          <visualize>true</visualize>
+          <camera name="d435_depth_camera">
+            <horizontal_fov>${horizontal_fov}</horizontal_fov>
+            <image>
+              <width>${image_width}</width>
+              <height>${image_height}</height>
+              <format>R8G8B8</format>
+            </image>
+            <clip><near>0.10</near><far>10.0</far></clip>
+          </camera>
+          <plugin name="d435_depth_controller" filename="libgazebo_ros_openni_kinect.so">
+            <robotNamespace>/</robotNamespace>
+            <alwaysOn>true</alwaysOn>
+            <cameraName>d435_depth</cameraName>
+            <imageTopicName>${topic_prefix}/depth/image_raw_unused</imageTopicName>
+            <cameraInfoTopicName>${topic_prefix}/depth/camera_info_unused</cameraInfoTopicName>
+            <depthImageTopicName>${topic_prefix}/depth/image_rect_raw</depthImageTopicName>
+            <depthImageCameraInfoTopicName>${topic_prefix}/depth/camera_info</depthImageCameraInfoTopicName>
+            <pointCloudTopicName>${topic_prefix}/depth/points</pointCloudTopicName>
+            <frameName>camera_depth_optical_frame</frameName>
+            <updateRate>0.0</updateRate>
+            <hackBaseline>0.050</hackBaseline>
+            <pointCloudCutoff>0.10</pointCloudCutoff>
+            <pointCloudCutoffMax>10.0</pointCloudCutoffMax>
+          </plugin>
+        </sensor>
+      </gazebo>
+    </xacro:if>
+  </xacro:macro>
+</robot>

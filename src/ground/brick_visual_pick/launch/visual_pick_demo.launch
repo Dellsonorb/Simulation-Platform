@@ -1,0 +1,52 @@
+<launch>
+  <arg name="gui" default="true"/>
+  <arg name="rviz" default="false"/>
+  <arg name="brick_x" default="0.82"/>
+  <arg name="brick_y" default="0.0"/>
+  <arg name="brick_yaw" default="0.0"/>
+  <arg name="brick_orientation_mode" default="flat"/>
+  <arg name="ag95_effort_coupled" default="false"/>
+  <arg name="lock_ag95_open" default="false"/>
+  <arg name="mobile_manipulation_startup" default="false"/>
+  <arg name="gripper_motion_time" default="2.0"/>
+
+  <param name="/brick_pick_demo/success" value="false"/>
+
+  <include file="$(find bunker_aubo_gazebo)/launch/brick_world.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="brick_x" value="$(arg brick_x)"/>
+    <arg name="brick_y" value="$(arg brick_y)"/>
+    <arg name="brick_yaw" value="$(arg brick_yaw)"/>
+    <arg name="brick_orientation_mode" value="$(arg brick_orientation_mode)"/>
+    <arg name="ag95_effort_coupled" value="$(arg ag95_effort_coupled)"/>
+    <arg name="lock_ag95_open" value="$(arg lock_ag95_open)"/>
+    <arg name="mobile_manipulation_startup"
+         value="$(arg mobile_manipulation_startup)"/>
+    <arg name="camera_enable_rgbd" value="true"/>
+  </include>
+
+  <include file="$(find bunker_aubo_moveit_config)/launch/moveit_planning_execution.launch">
+    <arg name="start_gazebo" value="false"/>
+    <arg name="rviz" value="$(arg rviz)"/>
+  </include>
+  <include file="$(find brick_rgbd_perception)/launch/perception.launch"/>
+  <include file="$(find brick_rgbd_perception)/launch/pose_estimator.launch">
+    <arg name="brick_orientation_mode" value="$(arg brick_orientation_mode)"/>
+  </include>
+  <include file="$(find brick_pick_demo)/launch/brick_pick.launch">
+    <arg name="planning_frame" value="aubo_i5_base_link"/>
+    <arg name="brick_orientation_mode" value="$(arg brick_orientation_mode)"/>
+    <arg name="gripper_motion_time" value="$(arg gripper_motion_time)"/>
+  </include>
+
+  <node name="move_to_camera_observation" pkg="bunker_aubo_gazebo"
+        type="move_to_camera_observation.py" output="screen"
+        launch-prefix="bash -c 'sleep 2; exec &quot;$@&quot;' --">
+    <rosparam command="load" file="$(find bunker_aubo_gazebo)/config/camera_observation.yaml"/>
+  </node>
+  <node name="brick_pose_gate" pkg="brick_visual_pick"
+        type="brick_pose_gate.py" output="screen" required="true">
+    <rosparam command="load" file="$(find brick_visual_pick)/config/pose_gate.yaml"/>
+    <rosparam command="load" file="$(find bunker_aubo_gazebo)/config/camera_observation.yaml"/>
+  </node>
+</launch>

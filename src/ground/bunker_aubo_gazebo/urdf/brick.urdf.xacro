@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<robot name="brick" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="length" default="0.240"/>
+  <xacro:arg name="width" default="0.115"/>
+  <xacro:arg name="height" default="0.053"/>
+  <xacro:arg name="mass" default="2.5"/>
+  <xacro:arg name="orientation_mode" default="flat"/>
+  <xacro:property name="l" value="$(arg length)"/>
+  <xacro:property name="nominal_w" value="$(arg width)"/>
+  <xacro:property name="nominal_h" value="$(arg height)"/>
+  <xacro:property name="orientation_mode" value="$(arg orientation_mode)"/>
+  <xacro:property name="w"
+                  value="${nominal_w if orientation_mode == 'flat' else nominal_h if orientation_mode == 'side_up' else 1.0 / 0.0}"/>
+  <xacro:property name="h"
+                  value="${nominal_h if orientation_mode == 'flat' else nominal_w if orientation_mode == 'side_up' else 1.0 / 0.0}"/>
+  <xacro:property name="m" value="$(arg mass)"/>
+
+  <link name="brick_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${m}"/>
+      <inertia ixx="${m * (w*w + h*h) / 12.0}" ixy="0" ixz="0"
+               iyy="${m * (l*l + h*h) / 12.0}" iyz="0"
+               izz="${m * (l*l + w*w) / 12.0}"/>
+    </inertial>
+    <visual>
+      <geometry><box size="${l} ${w} ${h}"/></geometry>
+      <material name="brick_red"><color rgba="0.55 0.12 0.06 1"/></material>
+    </visual>
+    <collision><geometry><box size="${l} ${w} ${h}"/></geometry></collision>
+  </link>
+  <gazebo reference="brick_link">
+    <material>Gazebo/Red</material>
+    <gravity>true</gravity>
+    <mu1>1.2</mu1><mu2>1.2</mu2>
+    <kp>1000000.0</kp><kd>10.0</kd>
+    <minDepth>0.001</minDepth><maxVel>0.02</maxVel>
+  </gazebo>
+</robot>

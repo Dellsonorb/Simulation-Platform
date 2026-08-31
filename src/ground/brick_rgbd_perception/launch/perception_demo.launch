@@ -1,0 +1,21 @@
+<launch>
+  <arg name="gui" default="true"/>
+  <arg name="rviz" default="true"/>
+  <arg name="image_view" default="false"/>
+  <arg name="move_to_observation" default="true"/>
+
+  <include file="$(find bunker_aubo_gazebo)/launch/camera_demo.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="image_view" value="false"/>
+    <arg name="move_to_observation" value="$(arg move_to_observation)"/>
+  </include>
+  <include file="$(find brick_rgbd_perception)/launch/perception.launch"/>
+
+  <node if="$(arg rviz)" name="brick_perception_rviz" pkg="rviz" type="rviz"
+        args="-d $(find brick_rgbd_perception)/rviz/brick_perception.rviz"
+        output="screen"/>
+  <node if="$(arg image_view)" name="brick_mask_view" pkg="rqt_image_view"
+        type="rqt_image_view" args="/brick_rgbd_perception/mask"/>
+  <node if="$(arg image_view)" name="brick_debug_view" pkg="rqt_image_view"
+        type="rqt_image_view" args="/brick_rgbd_perception/debug_rgb"/>
+</launch>

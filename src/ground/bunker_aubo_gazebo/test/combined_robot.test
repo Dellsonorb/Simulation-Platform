@@ -1,0 +1,7 @@
+<launch>
+  <include file="$(find bunker_aubo_gazebo)/launch/combined_robot.launch">
+    <arg name="gui" value="false"/>
+  </include>
+  <test test-name="combined_robot" pkg="bunker_aubo_gazebo"
+        type="test_combined_robot.py" time-limit="90"/>
+</launch>

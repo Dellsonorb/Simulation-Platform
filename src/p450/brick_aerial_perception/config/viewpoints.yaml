@@ -1,0 +1,20 @@
+arrival_tolerance: 0.20
+yaw_tolerance: 0.14
+settle_time: 1.5
+waypoint_timeout: 35.0
+sample_duration: 3.0
+max_settle_linear_speed: 0.10
+max_settle_angular_speed: 0.10
+viewpoints:
+  - id: center_low
+    position: [-1.70, 0.00, 1.35]
+    yaw: 0.0
+  - id: left_low
+    position: [-1.70, -0.55, 1.35]
+    yaw: 0.313
+  - id: right_low
+    position: [-1.70, 0.55, 1.35]
+    yaw: -0.313
+  - id: center_high
+    position: [-2.20, 0.00, 1.75]
+    yaw: 0.0

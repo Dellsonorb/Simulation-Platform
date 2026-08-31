@@ -1,0 +1,10 @@
+<launch>
+  <include file="$(find brick_rgbd_perception)/launch/perception_demo.launch">
+    <arg name="gui" value="false"/>
+    <arg name="rviz" value="false"/>
+    <arg name="image_view" value="false"/>
+  </include>
+  <include file="$(find brick_rgbd_perception)/launch/pose_estimator.launch"/>
+  <test test-name="pose_estimation_runtime" pkg="brick_rgbd_perception"
+        type="test_pose_estimation_runtime.py" time-limit="150"/>
+</launch>

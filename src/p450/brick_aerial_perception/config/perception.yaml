@@ -1,0 +1,36 @@
+sync_queue_size: 10
+sync_slop: 0.04
+min_depth: 0.25
+max_depth: 8.0
+min_mask_pixels: 40
+min_points: 150
+stable_frames: 5
+max_position_spread: 0.10
+max_yaw_spread: 0.20
+brick_length: 0.240
+brick_width: 0.115
+brick_height: 0.053
+brick_orientation_mode: flat
+world_frame: world
+camera_optical_frame: uav1/camera_color_optical_frame
+require_sampling_state: true
+mask_frontend: rgb_shape_component
+morph_kernel: 3
+red_hue_low_1: 0
+red_hue_high_1: 12
+red_hue_low_2: 165
+red_hue_high_2: 179
+min_saturation: 80
+min_value: 55
+min_component_area: 30.0
+max_component_area: 12000.0
+min_aspect_ratio: 1.8
+max_aspect_ratio: 8.5
+target_aspect_ratio: 4.53
+# Calibrated image-plane ratio for the fixed oblique P450 view.  This is
+# deliberately separate from the physical 0.240/0.053 top-face ratio.
+side_up_target_aspect_ratio: 2.0
+min_rectangularity: 0.55
+boundary_margin: 2
+min_frontend_score: 0.60
+frontend_ambiguity_margin: 0.06
