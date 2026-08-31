@@ -2,6 +2,7 @@ import hashlib
 import json
 import re
 import stat
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -102,6 +103,54 @@ def _load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _find_removed_entrypoint_references(root, package_roots, removed_paths):
+    candidates = set()
+    excluded_python_directories = {
+        "docs", "generated", "results", "test", "tests", "__pycache__",
+    }
+    for package_root in package_roots:
+        cmake = package_root / "CMakeLists.txt"
+        if cmake.is_file():
+            candidates.add(cmake)
+        launch_root = package_root / "launch"
+        if launch_root.is_dir():
+            candidates.update(path for path in launch_root.rglob("*.launch")
+                              if path.is_file())
+        candidates.update(
+            path for path in package_root.rglob("*.py")
+            if (path.is_file() and not any(
+                part in excluded_python_directories
+                for part in path.relative_to(package_root).parts[:-1]
+            ))
+        )
+
+    findings = set()
+    for candidate in candidates:
+        candidate_relative = candidate.relative_to(root).as_posix()
+        if candidate_relative in removed_paths:
+            continue
+        text = candidate.read_text(encoding="utf-8")
+        for removed in removed_paths:
+            removed_path = Path(removed)
+            package_relative = Path(*removed_path.parts[3:]).as_posix()
+            package_qualified = Path(*removed_path.parts[2:]).as_posix()
+            needles = {
+                removed,
+                package_relative,
+                package_qualified,
+                removed_path.name,
+            }
+            if (removed_path.suffix == ".py" and
+                    len(removed_path.parts) > 5 and
+                    removed_path.parts[3] == "src"):
+                module_parts = list(removed_path.parts[4:])
+                module_parts[-1] = Path(module_parts[-1]).stem
+                needles.add(".".join(module_parts))
+            if any(needle in text for needle in needles):
+                findings.add((candidate_relative, removed))
+    return tuple(sorted(findings))
+
+
 class RuntimeExtractionTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -192,22 +241,52 @@ class RuntimeExtractionTest(unittest.TestCase):
         self.assertEqual(expected, current)
 
     def test_removed_entrypoints_have_no_active_references(self):
-        for removed in sorted(EXACT_REMOVED):
-            removed_path = Path(removed)
-            package_root = ROOT.joinpath(*removed_path.parts[:3])
-            scoped = removed_path.relative_to(Path(*removed_path.parts[:3]))
-            candidates = [package_root / "CMakeLists.txt"]
-            candidates.extend(package_root.glob("launch/**/*.launch"))
-            candidates.extend(package_root.rglob("*.py"))
-            for candidate in candidates:
-                if not candidate.is_file():
-                    continue
-                relative_candidate = candidate.relative_to(ROOT).as_posix()
-                if relative_candidate in EXACT_REMOVED:
-                    continue
-                text = candidate.read_text(encoding="utf-8")
-                self.assertNotIn(scoped.as_posix(), text, relative_candidate)
-                self.assertNotIn(removed_path.name, text, relative_candidate)
+        package_roots = tuple(
+            ROOT / spec.destination
+            for spec in self.manifest.packages.values()
+            if spec.imported
+        )
+        self.assertEqual(
+            (),
+            _find_removed_entrypoint_references(
+                ROOT, package_roots, EXACT_REMOVED),
+        )
+
+    def test_removed_entrypoint_scan_catches_cross_package_references(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture_root = Path(temporary)
+            source_package = fixture_root / "src/p450/source_package"
+            consumer_package = fixture_root / "src/ground/consumer_package"
+            (source_package / "scripts").mkdir(parents=True)
+            (consumer_package / "scripts").mkdir(parents=True)
+            reference = consumer_package / "scripts/cross_package_reference.py"
+            reference.write_text(
+                "ENTRYPOINT = 'retired_entrypoint.py'\n"
+                "import source_package.retired_module\n",
+                encoding="utf-8")
+
+            findings = _find_removed_entrypoint_references(
+                fixture_root,
+                (source_package, consumer_package),
+                frozenset({
+                    "src/p450/source_package/scripts/retired_entrypoint.py",
+                    "src/p450/source_package/src/source_package/"
+                    "retired_module.py",
+                }),
+            )
+
+            self.assertEqual(
+                (
+                    ("src/ground/consumer_package/scripts/"
+                     "cross_package_reference.py",
+                     "src/p450/source_package/scripts/retired_entrypoint.py"),
+                    ("src/ground/consumer_package/scripts/"
+                     "cross_package_reference.py",
+                     "src/p450/source_package/src/source_package/"
+                     "retired_module.py"),
+                ),
+                findings,
+            )
 
     def test_affected_cmake_references_only_existing_scripts_and_tests(self):
         for package_root in AFFECTED_PACKAGE_ROOTS:
