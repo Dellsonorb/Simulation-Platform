@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "source": {
+    "remote": "https://gitee.com/amovlab/p_sitl_gazebo.git",
+    "pinned_commit": "9566172e7c0760f66681304b963d675c5b120daf",
+    "introduction_commit": "81bd1734c909bd1684bb03bbf4187e77a83b22a6",
+    "author": "Eason Yi",
+    "license_status": "redistribution-unresolved",
+    "license_note": "The pinned source tree contains no tracked license text for these assets; redistribution permission remains unresolved."
+  },
+  "files": [
+    {
+      "source": "models/MID360/model.config",
+      "target": "models/MID360/model.config",
+      "sha256": "fef13d37eddc6fe097b3554a570a957e885e815288858c917f57fb724ac81efa"
+    },
+    {
+      "source": "models/MID360/MID360.sdf",
+      "target": "models/MID360/MID360.sdf",
+      "sha256": "285813d7f1fe7c1db3ede76aad365ad43379b198f22978fbebe1d1b8599ccdc5"
+    },
+    {
+      "source": "models/MID360/meshes/MID360.dae",
+      "target": "models/MID360/meshes/MID360.dae",
+      "sha256": "464a158c872c3ca7cf8124f464b3610e07c560e652894b960e1ad6061d9382e2"
+    },
+    {
+      "source": "models/MID360/scan_mode/mid360.csv",
+      "target": "models/MID360/scan_mode/mid360.csv",
+      "sha256": "aa1fc08b6a4400608dbd6ee832b7ea3a9c3c37197e734f60f58fe5abf762269a"
+    }
+  ],
+  "excluded": [
+    "models/MID360/meshes/MID360.stl"
+  ]
+}

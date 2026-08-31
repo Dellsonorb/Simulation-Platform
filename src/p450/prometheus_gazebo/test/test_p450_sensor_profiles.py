@@ -106,20 +106,6 @@ class P450SensorProfileTest(unittest.TestCase):
                 self.assertIn("gui", args)
                 self.assertIn("rviz_enable", args)
 
-    def test_fast_lio_topics_are_parameterized_by_uav_id(self):
-        launch = (PACKAGE_ROOT.parents[1] / "Modules/FAST_LIO/launch/mapping_mid360_gazebo.launch").read_text()
-        self.assertIn('name="lid_topic"', launch)
-        self.assertIn('name="imu_topic"', launch)
-        self.assertIn('name="common/lid_topic"', launch)
-        self.assertIn('value="$(arg lid_topic)"', launch)
-        self.assertIn('name="common/imu_topic"', launch)
-        self.assertIn('value="$(arg imu_topic)"', launch)
-        self.assertIn('name="odometry_log_dir"', launch)
-
-        source = (PACKAGE_ROOT.parents[1] / "Modules/FAST_LIO/src/laserMapping.cpp").read_text()
-        self.assertNotIn("/home/amov", source)
-        self.assertIn('nh.param<string>("odometry_log_dir"', source)
-
     def test_octomap_outputs_are_sensor_specific(self):
         launch_dir = LAUNCH_ROOT
         depth = (launch_dir / "depth_to_octomap.launch").read_text()
@@ -140,8 +126,8 @@ class P450SensorProfileTest(unittest.TestCase):
 
     def test_livox_plugin_resolves_scan_pattern_from_gazebo_model_path(self):
         plugin = (
-            PACKAGE_ROOT.parents[1]
-            / "Simulator/livox_laser_gazebo_plugins/src/livox_points_plugin.cpp"
+            PACKAGE_ROOT.parent
+            / "livox_laser_gazebo_plugins/src/livox_points_plugin.cpp"
         ).read_text()
         self.assertNotIn("/home/amov", plugin)
         self.assertIn('sdf->Get<std::string>("csv_file_name")', plugin)

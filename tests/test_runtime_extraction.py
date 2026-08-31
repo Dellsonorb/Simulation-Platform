@@ -71,6 +71,7 @@ EXACT_MODIFIED = frozenset({
     "src/p450/brick_aerial_perception/test/test_ros_contract.py",
     "src/p450/prometheus_gazebo/CMakeLists.txt",
     "src/p450/prometheus_gazebo/package.xml",
+    "src/p450/prometheus_gazebo/test/test_p450_sensor_profiles.py",
     "src/p450/prometheus_msgs/CMakeLists.txt",
     "src/p450/prometheus_msgs/package.xml",
     "src/p450/prometheus_uav_control/CMakeLists.txt",
@@ -274,7 +275,7 @@ class RuntimeExtractionTest(unittest.TestCase):
         self.assertEqual(sorted(EXACT_MODIFIED),
                          list(overlay["modified"]))
         self.assertEqual(42, len(overlay["removed"]))
-        self.assertEqual(23, len(overlay["modified"]))
+        self.assertEqual(24, len(overlay["modified"]))
 
     def test_removed_files_are_tracked_upstream_and_absent_now(self):
         recorded = self.provenance["files"]

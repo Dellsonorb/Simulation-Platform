@@ -64,6 +64,7 @@
     "src/p450/brick_aerial_perception/test/test_ros_contract.py": "3f53de5076dc17858c6519bd16ea696aca9e03f8b862e6d9d79c649c3b5c1517",
     "src/p450/prometheus_gazebo/CMakeLists.txt": "1f2ef6c0eeb81fd65fee45dae303b19020d229c5a3031ef33f9512d84d30d1d8",
     "src/p450/prometheus_gazebo/package.xml": "57ce403c0187ea73075ef83ef9465a69608a8959046c8671b0c103830ba270fd",
+    "src/p450/prometheus_gazebo/test/test_p450_sensor_profiles.py": "465db98c2aa1c9878d261cbc75bb215f3dcbe89ddf712631913ca5240df36020",
     "src/p450/prometheus_msgs/CMakeLists.txt": "bf24e658dd1c6386442fadf45e2dd01f026467eb2eb53f5a8abb32a67e50130c",
     "src/p450/prometheus_msgs/package.xml": "138647587275e9bf4b1085051deeadfd10a9ad66e8764d6e3380cd2c8445da01",
     "src/p450/prometheus_uav_control/CMakeLists.txt": "23495ba6dfa906ad9516c5326e7fd808b332806260c95a2d6c8bbf294a26d9c6",
