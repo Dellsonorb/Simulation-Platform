@@ -1,42 +1,75 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.0.2)
 project(livox_laser_gazebo_plugins)
 
-## Compile as C++11, supported in ROS Kinetic and newer
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(catkin REQUIRED COMPONENTS
-  roscpp
-  tf
-  sensor_msgs
-  std_msgs
-  message_generation
+  gazebo_dev
+  pcl_conversions
   prometheus_msgs
+  roscpp
+  sensor_msgs
+  tf
 )
-
 find_package(gazebo REQUIRED)
 find_package(PCL REQUIRED)
-include_directories(${GAZEBO_INCLUDE_DIRS})
+find_package(Protobuf REQUIRED)
 
-#To solve the error which gazebo does not handle the include file well, we must add this line.
-include_directories(/usr/include/)
-
-link_directories(${GAZEBO_LIBRARY_DIRS})
-
-#This is designed for whose proto installed in system is not 2.6. We can install the version of proto in local dir
-include_directories(
-         include
-        ${catkin_INCLUDE_DIRS}
-        ${PCL_INCLUDE_DIRS}
+find_library(
+  GAZEBO_RAY_PLUGIN
+  NAMES RayPlugin
+  PATHS ${GAZEBO_LIBRARY_DIRS}
+  NO_DEFAULT_PATH
 )
+if(NOT GAZEBO_RAY_PLUGIN OR NOT IS_ABSOLUTE "${GAZEBO_RAY_PLUGIN}")
+  message(FATAL_ERROR "Gazebo RayPlugin was not found at an absolute host library path")
+endif()
 
 catkin_package(
-        INCLUDE_DIRS include
-        LIBRARIES livox_laser_gazebo_plugins
-        CATKIN_DEPENDS tf
+  INCLUDE_DIRS include
+  LIBRARIES livox_laser_gazebo_plugins
+  CATKIN_DEPENDS
+  gazebo_dev
+  pcl_conversions
+  prometheus_msgs
+  roscpp
+  sensor_msgs
+  tf
+  DEPENDS PCL
 )
 
-add_library(livox_laser_gazebo_plugins SHARED src/livox_points_plugin.cpp src/livox_ode_multiray_shape.cpp)
-target_link_libraries(livox_laser_gazebo_plugins ${catkin_LIBRARIES} RayPlugin)
+add_library(
+  livox_laser_gazebo_plugins
+  SHARED
+  src/livox_points_plugin.cpp
+  src/livox_ode_multiray_shape.cpp
+)
+target_include_directories(
+  livox_laser_gazebo_plugins
+  PUBLIC
+  include
+  ${catkin_INCLUDE_DIRS}
+  ${GAZEBO_INCLUDE_DIRS}
+  ${PCL_INCLUDE_DIRS}
+)
+add_dependencies(livox_laser_gazebo_plugins ${catkin_EXPORTED_TARGETS})
+target_link_libraries(
+  livox_laser_gazebo_plugins
+  ${catkin_LIBRARIES}
+  ${GAZEBO_LIBRARIES}
+  ${PCL_LIBRARIES}
+  protobuf::libprotobuf
+  ${GAZEBO_RAY_PLUGIN}
+)
 
-target_link_libraries(livox_laser_gazebo_plugins libprotobuf.so.9)
+install(
+  TARGETS livox_laser_gazebo_plugins
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+install(
+  DIRECTORY include/livox_laser_simulation/
+  DESTINATION ${CATKIN_GLOBAL_INCLUDE_DESTINATION}/livox_laser_simulation
+)

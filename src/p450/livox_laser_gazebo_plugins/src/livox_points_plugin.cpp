@@ -69,6 +69,13 @@ void LivoxPointsPlugin::Load(gazebo::sensors::SensorPtr _parent, sdf::ElementPtr
     char **argv = nullptr;
     auto curr_scan_topic = sdf->Get<std::string>("ros_topic");
     frameName = sdf->Get<std::string>("frameName");
+    if (!frameName.empty() && frameName.front() == '/') {
+        frameName.erase(0, 1);
+    }
+    if (frameName.empty()) {
+        ROS_ERROR_STREAM("Livox frameName must not be empty");
+        return;
+    }
     ROS_INFO_STREAM("ros topic name:" << curr_scan_topic);
     ROS_INFO_STREAM("ros frame id: "<<frameName);
 
@@ -359,7 +366,6 @@ void LivoxPointsPlugin::PublishPointCloud(std::vector<std::pair<int, AviaRotateI
     sensor_msgs::PointCloud scan_point;
     scan_point.header.stamp = ros::Time::now();
     scan_point.header.frame_id = frameName;
-    scan_point.header.frame_id = "livox";
     auto &scan_points = scan_point.points;
     for (auto &pair : points_pair) {
         int verticle_index = roundf((pair.second.zenith - verticle_min) / verticle_incre);

@@ -888,16 +888,29 @@ class Mid360FutureRuntimeContractTest(unittest.TestCase):
         package = ET.parse(PLUGIN_ROOT / "package.xml").getroot()
         self.assertEqual("2", package.attrib.get("format"))
         self.assertEqual([], package.findall("depend"))
-        for tag in ("build_depend", "build_export_depend", "exec_depend"):
+        expected_dependencies = {
+            "build_depend": REQUIRED_CATKIN_DEPENDENCIES
+            | {"libpcl-all-dev", "protobuf-dev"},
+            "build_export_depend": REQUIRED_CATKIN_DEPENDENCIES
+            | {"libpcl-all-dev"},
+            "exec_depend": REQUIRED_CATKIN_DEPENDENCIES,
+        }
+        for tag, expected in expected_dependencies.items():
             with self.subTest(tag=tag):
                 observed = {node.text.strip() for node in package.findall(tag)}
-                self.assertEqual(REQUIRED_CATKIN_DEPENDENCIES, observed)
+                self.assertEqual(expected, observed)
+        buildtools = {
+            node.text.strip() for node in package.findall("buildtool_depend")
+        }
+        self.assertEqual({"catkin"}, buildtools)
         licenses = {node.text.strip() for node in package.findall("license")}
-        self.assertTrue(licenses)
-        self.assertFalse(
-            {value.casefold() for value in licenses}
-            & {"todo", "unknown", "tbd", "placeholder"}
+        self.assertEqual({"LicenseRef-Upstream-Unresolved"}, licenses)
+        description = " ".join(
+            "".join(package.find("description").itertext()).split()
         )
+        self.assertIn("component-specific licensing", description)
+        self.assertIn("base import provenance", description)
+        self.assertIn("does not resolve", description)
 
     def test_livox_sources_do_not_override_the_configured_frame(self):
         source_paths = tuple(sorted(
