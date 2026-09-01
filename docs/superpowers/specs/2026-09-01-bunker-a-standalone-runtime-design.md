@@ -1,7 +1,6 @@
 # BUNKER-A Standalone Runtime Design
 
-**Status:** BUNKER-A direction approved on 2026-09-01; written specification
-awaiting review
+**Status:** Approved for implementation on 2026-09-01
 
 ## Purpose
 
