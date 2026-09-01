@@ -28,22 +28,47 @@
       <child link="d435_link"/>
       <origin xyz="0 0 0" rpy="0 0 0"/>
     </joint>
+    <gazebo reference="d435_joint">
+      <preserveFixedJoint>true</preserveFixedJoint>
+    </gazebo>
 
-    <link name="d435_color_optical_frame"/>
+    <link name="d435_color_optical_frame">
+      <inertial>
+        <mass value="0.001"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <inertia ixx="0.000001" ixy="0" ixz="0"
+                 iyy="0.000001" iyz="0" izz="0.000001"/>
+      </inertial>
+    </link>
     <joint name="d435_color_optical_joint" type="fixed">
       <parent link="d435_link"/>
       <child link="d435_color_optical_frame"/>
-      <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+      <origin xyz="0.05 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
     </joint>
-    <link name="d435_depth_optical_frame"/>
+    <gazebo reference="d435_color_optical_joint">
+      <preserveFixedJoint>true</preserveFixedJoint>
+    </gazebo>
+    <link name="d435_depth_optical_frame">
+      <inertial>
+        <mass value="0.001"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <inertia ixx="0.000001" ixy="0" ixz="0"
+                 iyy="0.000001" iyz="0" izz="0.000001"/>
+      </inertial>
+    </link>
     <joint name="d435_depth_optical_joint" type="fixed">
       <parent link="d435_link"/>
       <child link="d435_depth_optical_frame"/>
-      <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+      <origin xyz="0.05 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
     </joint>
+    <gazebo reference="d435_depth_optical_joint">
+      <preserveFixedJoint>true</preserveFixedJoint>
+    </gazebo>
 
-    <gazebo reference="d435_link">
+    <gazebo reference="d435_color_optical_frame">
       <sensor name="ground_d435_color" type="camera">
+        <!-- Gazebo cameras look along local +X; ROS optical frames use +Z. -->
+        <pose>0 0 0 0 ${-pi/2} ${pi/2}</pose>
         <always_on>true</always_on>
         <update_rate>15.0</update_rate>
         <visualize>false</visualize>
@@ -65,8 +90,11 @@
           <updateRate>0.0</updateRate>
         </plugin>
       </sensor>
+    </gazebo>
 
+    <gazebo reference="d435_depth_optical_frame">
       <sensor name="ground_d435_depth" type="depth">
+        <pose>0 0 0 0 ${-pi/2} ${pi/2}</pose>
         <always_on>true</always_on>
         <update_rate>15.0</update_rate>
         <visualize>false</visualize>

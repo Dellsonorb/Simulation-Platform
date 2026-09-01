@@ -4,6 +4,8 @@ UAV_estimator::UAV_estimator(ros::NodeHandle &nh): nh(nh)
 {
     // 【参数】编号
     nh.param<int>("uav_id", uav_id, 1);
+    // PX4 local ENU is anchored into the shared simulation world by launch.
+    nh.param<std::string>("tf_parent_frame", tf_parent_frame, "world");
     // 【参数】定位源, 定义见UAVState.msg
     nh.param<int>("control/location_source", location_source, prometheus_msgs::UAVState::GPS);
     // 【参数】最大安全速度
@@ -251,7 +253,7 @@ void UAV_estimator::timercb_pub_uav_state(const ros::TimerEvent &e)
     {
         // 发布无人机当前odometry(有些节点需要Odometry这个数据类型)
         uav_odom.header.stamp = ros::Time::now();
-        uav_odom.header.frame_id = "world";
+        uav_odom.header.frame_id = tf_parent_frame;
         uav_odom.child_frame_id = uav_name + "/base_link";
         uav_odom.pose.pose.position.x = uav_state.position[0];
         uav_odom.pose.pose.position.y = uav_state.position[1];
@@ -268,7 +270,7 @@ void UAV_estimator::timercb_pub_uav_state(const ros::TimerEvent &e)
         uav_odom_pub.publish(uav_odom);
 
         // 发布无人机d435i当前odometry(有些节点需要Odometry这个数据类型)
-        camera_odom.header.frame_id = "world";
+        camera_odom.header.frame_id = tf_parent_frame;
         camera_odom.header.stamp = ros::Time::now();
         camera_odom.child_frame_id = uav_name + "/camera_link";
         camera_odom.pose.pose.position.x = uav_odom.pose.pose.position.x + d435i_offset.x;
@@ -418,7 +420,7 @@ void UAV_estimator::timercb_rviz(const ros::TimerEvent &e)
     // 发布无人机运动轨迹，用于rviz显示
     geometry_msgs::PoseStamped uav_pos;
     uav_pos.header.stamp = ros::Time::now();
-    uav_pos.header.frame_id = "world";
+    uav_pos.header.frame_id = tf_parent_frame;
     uav_pos.pose.position.x = uav_state.position[0];
     uav_pos.pose.position.y = uav_state.position[1];
     uav_pos.pose.position.z = uav_state.position[2];
@@ -431,13 +433,13 @@ void UAV_estimator::timercb_rviz(const ros::TimerEvent &e)
     
     nav_msgs::Path uav_trajectory;
     uav_trajectory.header.stamp = ros::Time::now();
-    uav_trajectory.header.frame_id = "world";
+    uav_trajectory.header.frame_id = tf_parent_frame;
     uav_trajectory.poses = pos_vector;
     uav_trajectory_pub.publish(uav_trajectory);
 
     // 发布无人机marker
     visualization_msgs::Marker meshROS;
-    meshROS.header.frame_id = "world";
+    meshROS.header.frame_id = tf_parent_frame;
     meshROS.header.stamp = ros::Time::now();
     meshROS.ns = "mesh";
     meshROS.id = 0;
@@ -465,7 +467,7 @@ void UAV_estimator::timercb_rviz(const ros::TimerEvent &e)
     geometry_msgs::TransformStamped tfs;
 
     //  |----头设置
-    tfs.header.frame_id = "world";       //相对于世界坐标系
+    tfs.header.frame_id = tf_parent_frame;
     tfs.header.stamp = ros::Time::now(); //时间戳
     //  |----坐标系 ID
     tfs.child_frame_id = uav_name + "/base_link"; //子坐标系，无人机的坐标系

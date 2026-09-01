@@ -665,6 +665,8 @@ class P450SensorProfileSmokeContractTest(unittest.TestCase):
         contract = yaml.safe_load(MID360_TF_CONTRACT.read_text(encoding="utf-8"))
         composite = contract["composite"]
         authorities = {
+            "uav1/local_origin": [
+                "/uav1/p450_tf_world_local_origin"],
             "uav1/base_link": ["/uav_control_main_1"],
             "uav1/camera_link": ["/uav_control_main_1"],
             "uav1/camera_depth_frame": ["/uav1/p450_tf_camera_depth"],

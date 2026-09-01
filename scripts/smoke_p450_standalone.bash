@@ -826,6 +826,7 @@ import sys
 from pathlib import Path
 
 expected = {
+    "uav1/local_origin": {"/uav1/p450_tf_world_local_origin"},
     "uav1/base_link": {"/uav_control_main_1"},
     "uav1/camera_link": {"/uav_control_main_1"},
     "uav1/camera_depth_frame": {"/uav1/p450_tf_camera_depth"},
@@ -1016,6 +1017,7 @@ if verdict == "PASS":
         "model", "prometheus_state", "px4_process", "uav_controller_node",
     }
     expected_authorities = {
+        "uav1/local_origin": ["/uav1/p450_tf_world_local_origin"],
         "uav1/base_link": ["/uav_control_main_1"],
         "uav1/camera_link": ["/uav_control_main_1"],
         "uav1/camera_depth_frame": ["/uav1/p450_tf_camera_depth"],

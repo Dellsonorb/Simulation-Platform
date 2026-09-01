@@ -165,6 +165,7 @@ class UAV_estimator
         int uav_id;                   // 无人机编号
         string uav_name;                // 无人机名字
         string node_name;
+        string tf_parent_frame;
         int location_source;    
         float maximum_safe_vel_xy;
         float maximum_safe_vel_z;

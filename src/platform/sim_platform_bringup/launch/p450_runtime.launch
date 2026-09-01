@@ -28,6 +28,12 @@
       output="screen"
       args="-sdf -param sdf_p450_D435i_0 -model p450_D435i_0 -x $(arg uav1_init_x) -y $(arg uav1_init_y) -z $(arg uav1_init_z) -Y $(arg uav1_init_yaw)"/>
 
+    <!-- PX4 local ENU starts at the configured spawn position. Keep that
+         local control frame explicit, then anchor it into Gazebo world. -->
+    <node pkg="tf2_ros" type="static_transform_publisher"
+      name="p450_tf_world_local_origin"
+      args="$(arg uav1_init_x) $(arg uav1_init_y) $(arg uav1_init_z) 0 0 0 world uav1/local_origin"/>
+
     <node
       pkg="sim_platform_bringup"
       type="px4_sitl_node.bash"
@@ -94,6 +100,7 @@
 
     <param name="enable_px4_params_load" type="bool" value="false"/>
     <param name="uav_id" type="int" value="1"/>
+    <param name="tf_parent_frame" value="uav1/local_origin"/>
     <param name="sim_mode" type="bool" value="true"/>
     <param name="flag_printf" type="bool" value="false"/>
     <param name="control/enable_external_control" type="bool" value="false"/>

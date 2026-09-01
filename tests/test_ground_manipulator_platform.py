@@ -688,6 +688,57 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
         self.assertEqual(
             {"bunker_lidar_2d", "ground_d435_color", "ground_d435_depth"},
             {sensor.get("name") for sensor in root.findall(".//sensor")})
+        camera_sensor_poses = {
+            sensor.get("name"): sensor.findtext("pose")
+            for sensor in root.findall(".//sensor")
+            if sensor.get("name") in {
+                "ground_d435_color", "ground_d435_depth"}}
+        self.assertEqual({
+            "ground_d435_color": (
+                "0 0 0 0 -1.5707963267948966 1.5707963267948966"),
+            "ground_d435_depth": (
+                "0 0 0 0 -1.5707963267948966 1.5707963267948966"),
+        }, camera_sensor_poses)
+        camera_sensor_parents = {
+            sensor.get("name"): gazebo.get("reference")
+            for gazebo in root.findall("gazebo")
+            for sensor in gazebo.findall("sensor")
+            if sensor.get("name") in {
+                "ground_d435_color", "ground_d435_depth"}}
+        self.assertEqual({
+            "ground_d435_color": "ground/d435_color_optical_frame",
+            "ground_d435_depth": "ground/d435_depth_optical_frame",
+        }, camera_sensor_parents)
+        optical_joint_origins = {
+            joint.get("name"): joint.find("origin").get("xyz")
+            for joint in root.findall("joint")
+            if joint.get("name") in {
+                "d435_color_optical_joint",
+                "d435_depth_optical_joint"}}
+        self.assertEqual({
+            "d435_color_optical_joint": "0.05 0 0",
+            "d435_depth_optical_joint": "0.05 0 0",
+        }, optical_joint_origins)
+        for link_name in (
+                "ground/d435_color_optical_frame",
+                "ground/d435_depth_optical_frame"):
+            inertial = root.find(
+                "./link[@name='%s']/inertial" % link_name)
+            self.assertIsNotNone(inertial)
+            self.assertAlmostEqual(
+                1e-3, float(inertial.find("mass").get("value")))
+            inertia = inertial.find("inertia")
+            for axis in ("ixx", "iyy", "izz"):
+                self.assertGreater(float(inertia.get(axis)), 0.0)
+        d435_joint_gazebo = root.find("./gazebo[@reference='d435_joint']")
+        self.assertIsNotNone(d435_joint_gazebo)
+        self.assertEqual(
+            "true", d435_joint_gazebo.findtext("preserveFixedJoint"))
+        for joint_name in (
+                "d435_color_optical_joint", "d435_depth_optical_joint"):
+            gazebo = root.find("./gazebo[@reference='%s']" % joint_name)
+            self.assertIsNotNone(gazebo)
+            self.assertEqual("true", gazebo.findtext("preserveFixedJoint"))
         color_plugin = root.find(
             ".//plugin[@name='ground_d435_color_controller']")
         self.assertEqual("/ground", color_plugin.findtext("robotNamespace"))
@@ -748,6 +799,9 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
     def test_worldless_launch_owns_ground_interfaces_and_real_controllers(self):
         for path in (CONTROLLERS, RUNTIME_LAUNCH, STANDALONE_LAUNCH, WORLD):
             self.assertTrue(path.is_file(), "%s is missing" % path.name)
+        world = ET.parse(str(WORLD)).getroot().find("world")
+        self.assertEqual("ground_robot_world", world.get("name"))
+        self.assertNotEqual("ground_robot", world.get("name"))
 
         controllers = yaml.safe_load(CONTROLLERS.read_text(encoding="utf-8"))
         self.assertEqual({
