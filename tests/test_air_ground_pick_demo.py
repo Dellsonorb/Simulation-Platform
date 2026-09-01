@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import json
 import math
 import os
 from pathlib import Path
 import subprocess
+import threading
 import unittest
 import warnings
 import xml.etree.ElementTree as ET
@@ -31,6 +33,8 @@ ORCHESTRATOR = PACKAGE / "scripts/run_air_ground_pick_demo.py"
 TARGET_SPAWNER = PACKAGE / "scripts/spawn_pick_target.py"
 DEMO_CONFIG = PACKAGE / "config/demo.yaml"
 DEMO_LAUNCH = PACKAGE / "launch/air_ground_pick_demo.launch"
+DEMO_CHECKER = ROOT / "scripts/check_air_ground_pick_demo.py"
+DEMO_SMOKE = ROOT / "scripts/smoke_air_ground_pick_demo.bash"
 
 
 def _load_perception():
@@ -567,6 +571,7 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
             0.02, config["planning_orientation_tolerance"])
         self.assertAlmostEqual(0.02, config["pose_position_tolerance"])
         self.assertAlmostEqual(0.12, config["pose_orientation_tolerance"])
+        self.assertLessEqual(config["cartesian_velocity_scaling"], 0.05)
         self.assertGreater(config["pose_settle_timeout"], 0.0)
         self.assertLessEqual(config["pose_settle_timeout"], 5.0)
 
@@ -761,6 +766,160 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, timeout=10.0, env=environment)
         self.assertEqual(0, result.returncode, result.stderr)
+
+    @staticmethod
+    def _valid_demo_status_events():
+        states = (
+            "PREFLIGHT", "ARMING", "COMMAND_CONTROL", "TAKEOFF",
+            "AIR_VIEW", "AIR_OBSERVE", "AIR_HANDOFF", "LANDING",
+            "GROUND_APPROACH", "GROUND_STOPPED", "GROUND_OBSERVE",
+            "GROUND_REFINED", "PREGRASP", "GRASP", "LIFTING", "LIFT",
+        )
+        events = [
+            {"state": state, "ros_time": float(index + 1)}
+            for index, state in enumerate(states)
+        ]
+        events[6]["observation_stamp"] = 6.9
+        events[9].update({
+            "ground_travel": 0.47,
+            "target_distance": 0.82,
+        })
+        events[11]["observation_stamp"] = 11.9
+        events[15].update({
+            "tcp_lift": 0.14,
+            "bilateral_contact": True,
+        })
+        return events
+
+    def test_demo_checker_requires_exact_status_sequence_and_bounds(self):
+        checker = _load_module(
+            DEMO_CHECKER, "air_ground_pick_demo_checker_test_target")
+        events = self._valid_demo_status_events()
+        summary = checker.status_sequence_summary(
+            events, maximum_ground_travel=1.10, minimum_tcp_lift=0.10)
+        self.assertEqual(list(checker.EXPECTED_STATES), summary["states"])
+        self.assertEqual(1, summary["takeoff_count"])
+        self.assertEqual(1, summary["landing_count"])
+        self.assertAlmostEqual(0.47, summary["ground_travel_m"])
+        self.assertAlmostEqual(0.14, summary["tcp_lift_m"])
+
+        out_of_order = list(events)
+        out_of_order[7], out_of_order[8] = (
+            out_of_order[8], out_of_order[7])
+        with self.assertRaises(checker.DemoCheckError):
+            checker.status_sequence_summary(
+                out_of_order, maximum_ground_travel=1.10,
+                minimum_tcp_lift=0.10)
+
+        excessive_travel = [dict(event) for event in events]
+        excessive_travel[9]["ground_travel"] = 1.11
+        with self.assertRaises(checker.DemoCheckError):
+            checker.status_sequence_summary(
+                excessive_travel, maximum_ground_travel=1.10,
+                minimum_tcp_lift=0.10)
+
+        monitor = checker.DemoMonitor(
+            rospy=None, goal_succeeded=3,
+            contact_sides=lambda _pairs: (False, False),
+            target_model="pick_target")
+        message = type("Status", (), {})()
+        message.data = json.dumps(events[0])
+        monitor.status(message)
+        message.data = json.dumps(events[3])
+        callback = threading.Thread(target=monitor.status, args=(message,))
+        callback.daemon = True
+        callback.start()
+        callback.join(0.2)
+        self.assertFalse(callback.is_alive(), "status failure callback deadlocked")
+        self.assertTrue(monitor.terminal.is_set())
+        self.assertIn("unexpected status", monitor.snapshot()["error"])
+
+    def test_demo_checker_requires_fresh_topic_observations(self):
+        checker = _load_module(
+            DEMO_CHECKER, "air_ground_pick_observation_checker_test_target")
+        samples = (
+            {"stamp": 6.5, "frame": "world"},
+            {"stamp": 6.9, "frame": "world"},
+        )
+        summary = checker.observation_summary(
+            samples, status_time=7.0, expected_stamp=6.9,
+            expected_frame="world", maximum_age=1.0)
+        self.assertAlmostEqual(0.1, summary["age_s"])
+        self.assertAlmostEqual(6.9, summary["stamp"])
+        with self.assertRaises(checker.DemoCheckError):
+            checker.observation_summary(
+                samples, status_time=8.0, expected_stamp=6.9,
+                expected_frame="world", maximum_age=1.0)
+        with self.assertRaises(checker.DemoCheckError):
+            checker.observation_summary(
+                ({"stamp": 6.9, "frame": "camera"},),
+                status_time=7.0, expected_stamp=6.9,
+                expected_frame="world", maximum_age=1.0)
+
+    def test_demo_checker_requires_one_flight_controller_contact_and_lift(self):
+        checker = _load_module(
+            DEMO_CHECKER, "air_ground_pick_physics_checker_test_target")
+        self.assertEqual(
+            {"armed_seen": True, "landed_after_arm": True},
+            checker.flight_cycle_summary((False, True, True, False)))
+        with self.assertRaises(checker.DemoCheckError):
+            checker.flight_cycle_summary((False, False))
+
+        controller = checker.controller_success_summary(
+            ((11.8, "observe"), (12.2, "pregrasp"),
+             (13.0, "approach"), (15.0, "lift")),
+            after_stamp=12.0, minimum_successes=3)
+        self.assertEqual(3, controller["success_count"])
+        with self.assertRaises(checker.DemoCheckError):
+            checker.controller_success_summary(
+                ((12.2, "pregrasp"), (13.0, "approach")),
+                after_stamp=12.0, minimum_successes=3)
+
+        self.assertEqual(
+            {"bilateral_contact": True},
+            checker.bilateral_contact_summary(True))
+        with self.assertRaises(checker.DemoCheckError):
+            checker.bilateral_contact_summary(False)
+
+        lift = checker.target_lift_summary(
+            baseline_z=0.0575, final_z=0.1775, minimum_lift=0.10)
+        self.assertAlmostEqual(0.12, lift["target_lift_m"])
+        with self.assertRaises(checker.DemoCheckError):
+            checker.target_lift_summary(
+                baseline_z=0.0575, final_z=0.1474, minimum_lift=0.10)
+
+        finalized = checker.finalized_summary({
+            "status": "CHECKS_PASS", "sequence": {"states": ["LIFT"]}})
+        self.assertEqual("PASS", finalized["status"])
+        with self.assertRaises(checker.DemoCheckError):
+            checker.finalized_summary({"status": "PASS"})
+
+    def test_demo_smoke_is_bounded_isolated_and_platform_only(self):
+        self.assertTrue(DEMO_CHECKER.is_file())
+        self.assertTrue(DEMO_SMOKE.is_file())
+        self.assertTrue(DEMO_CHECKER.stat().st_mode & 0o111)
+        self.assertTrue(DEMO_SMOKE.stat().st_mode & 0o111)
+        help_result = subprocess.run(
+            [str(DEMO_SMOKE), "--help"], stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, timeout=5.0)
+        self.assertEqual(0, help_result.returncode, help_result.stderr)
+        source = DEMO_SMOKE.read_text(encoding="utf-8")
+        for required in (
+                "with_p450_env.bash", "air_ground_pick_demo.launch",
+                "check_air_ground_pick_demo.py", "ROS_MASTER_URI",
+                "GAZEBO_MASTER_URI", "/usr/bin/timeout", "setsid roslaunch",
+                "P450_GAZEBO_DISPLAY", "P450_GAZEBO_XAUTHORITY",
+                "summary.json", "launch_pgid",
+                '/bin/kill -INT -- "-$launch_pgid"',
+                '/bin/kill -TERM -- "-$launch_pgid"',
+                '/bin/kill -KILL -- "-$launch_pgid"',
+                "--finalize-summary"):
+            self.assertIn(required, source)
+        lowered = source.lower()
+        for forbidden in (
+                "benchmark", "provenance", "artifact", "formal", "pilot",
+                "lifecycle"):
+            self.assertNotIn(forbidden, lowered)
 
 
 if __name__ == "__main__":

@@ -78,7 +78,7 @@ pose_orientation_tolerance: 0.12
 pose_settle_timeout: 3.0
 cartesian_eef_step: 0.005
 cartesian_min_fraction: 0.95
-cartesian_velocity_scaling: 0.10
+cartesian_velocity_scaling: 0.05
 
 target_size: [0.240, 0.053, 0.115]
 target_center_height_tolerance: 0.030
