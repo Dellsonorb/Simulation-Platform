@@ -737,7 +737,7 @@ class RepositoryIntegrationTest(unittest.TestCase):
         self.assertEqual(
             (
                 "build/", "devel/", "install/", "logs/", ".catkin_tools/",
-                "__pycache__/", "*.pyc", ".import-staging-*/",
+                "__pycache__/", "*.pyc", ".import-staging-*/", ".worktrees/",
             ),
             tuple((ROOT / ".gitignore").read_text(
                 encoding="utf-8").splitlines()),
