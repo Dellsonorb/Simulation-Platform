@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Define the clean package and renderer contract
+### Task 1: Define the clean package and renderer transformation
 
 **Files:**
 - Create: `src/platform/ground_manipulator_runtime/CMakeLists.txt`
@@ -21,31 +21,32 @@
 - Create: `src/platform/ground_manipulator_runtime/scripts/render_ground_robot.py`
 - Create: `tests/test_ground_manipulator_platform.py`
 
-- [ ] **Step 1: Write the failing renderer/package contract**
+- [ ] **Step 1: Write the failing package/transformation contract**
 
   Assert that the package declares the BUNKER, AUBO, AG95, Gazebo control,
-  camera and MoveIt dependencies; that the renderer output has one root link,
-  explicit `ground/` link names, canonical joint names, only the required
-  plugins, the validated BUNKER box collision, and no brick/handoff tokens.
+  camera and MoveIt dependencies. Feed a minimal in-memory robot fixture to the
+  renderer transformation and assert explicit `ground/` link names, canonical
+  joint names, updated URDF/SDF/Gazebo references, fixed BUNKER wheel joints,
+  and the validated BUNKER box collision.
 
 - [ ] **Step 2: Run the contract and verify RED**
 
   Run: `/usr/bin/python3 -B -m unittest tests.test_ground_manipulator_platform`
 
-  Expected: failure because the package and renderer do not exist.
+  Expected: failure because the package and transformation do not exist.
 
 - [ ] **Step 3: Implement the minimal renderer**
 
-  Expand `ground_robot.urdf.xacro` with `/opt/ros/noetic/bin/xacro`, parse XML,
-  canonicalize BUNKER declarations and references, prefix only link names with
-  `ground/`, make wheel joints fixed, install the validated base collision, and
-  validate required links, joints, transmissions, sensors and plugin names.
+  Implement a pure XML transformation that canonicalizes declarations and
+  references, prefixes only link names with `ground/`, makes wheel joints
+  fixed, and installs the validated base collision. Add the CLI/package shell;
+  complete xacro expansion and full model validation in Task 2.
 
 - [ ] **Step 4: Run focused tests and commit**
 
   Run: `/usr/bin/python3 -B -m unittest tests.test_ground_manipulator_platform`
 
-  Expected: renderer/package tests pass.
+  Expected: package and pure transformation tests pass.
 
   Commit: `feat: define ground manipulator runtime model`
 
@@ -62,10 +63,12 @@
 
 - [ ] **Step 1: Write the failing launch/model contracts**
 
-  Assert one spawn node for `ground_robot`, no Gazebo include in the runtime,
-  one Gazebo include in the standalone wrapper, `/ground` controller and
-  sensor interfaces, required velocity guard, three controllers, explicit
-  world-to-odom TF, and absence of task/benchmark plugins.
+  Assert the complete renderer output has one root link, required arm/gripper
+  joints and transmissions, only the required runtime plugins, D435 and LiDAR
+  sensors, and no brick/handoff tokens. Also assert one spawn node for
+  `ground_robot`, no Gazebo include in the runtime, one Gazebo include in the
+  standalone wrapper, `/ground` controller and sensor interfaces, required
+  velocity guard, three controllers, and explicit world-to-odom TF.
 
 - [ ] **Step 2: Run tests and verify RED**
 
@@ -75,7 +78,8 @@
 
 - [ ] **Step 3: Implement the minimal composite runtime**
 
-  Include the SIM-local BUNKER, AUBO and AG95 xacros; mount AUBO on the base,
+  Complete the renderer's xacro expansion and runtime-tree validation. Include
+  the SIM-local BUNKER, AUBO and AG95 xacros; mount AUBO on the base,
   AG95 and a gripper TCP on the wrist, the D435 beside the gripper, the 2D
   LiDAR on the base, and configure the existing planar plugin plus
   `gazebo_ros_control`. Load bounded position trajectory controllers and spawn
