@@ -24,12 +24,8 @@ EXPECTED_NODES = {
         "robot_state_publisher", "robot_state_publisher"),
     "world_to_odom": ("tf2_ros", "static_transform_publisher"),
 }
-EXPECTED_SPAWN_PREFIX = (
-    "$(find bunker_sim_runtime)/scripts/spawn_bunker_preflight.py "
-    "$(arg x) $(arg y) $(arg z) $(arg roll) $(arg pitch) $(arg yaw) --"
-)
 EXPECTED_SPAWN_ARGS = (
-    "-urdf -param robot_description -model bunker -b "
+    "-urdf -param robot_description -model bunker "
     "-x $(arg x) -y $(arg y) -z $(arg z) "
     "-R $(arg roll) -P $(arg pitch) -Y $(arg yaw)"
 )
@@ -93,7 +89,7 @@ class LaunchContractTest(unittest.TestCase):
         })
         self.assertEqual(4, len(nodes))
         self.assertEqual("true", nodes["velocity_guard"].get("required"))
-        self.assertEqual("true", nodes["spawn_bunker"].get("required"))
+        self.assertIsNone(nodes["spawn_bunker"].get("required"))
         self.assertEqual("screen", nodes["velocity_guard"].get("output"))
         self.assertEqual("screen", nodes["spawn_bunker"].get("output"))
         self.assertEqual([], nodes["robot_state_publisher"].findall("param"))
@@ -103,14 +99,14 @@ class LaunchContractTest(unittest.TestCase):
             nodes["world_to_odom"].get("args"),
         )
 
-    def test_spawn_prefix_and_bonded_command_are_exact(self):
+    def test_spawn_prefix_and_one_shot_command_are_exact(self):
         spawn = next(
             item for item in _parse(RUNTIME_LAUNCH).iter("node")
             if item.get("name") == "spawn_bunker")
-        self.assertEqual(EXPECTED_SPAWN_PREFIX, spawn.get("launch-prefix"))
+        self.assertIsNone(spawn.get("launch-prefix"))
         self.assertEqual(EXPECTED_SPAWN_ARGS, spawn.get("args"))
         tokens = shlex.split(spawn.get("args"))
-        self.assertEqual(1, tokens.count("-b"))
+        self.assertNotIn("-b", tokens)
         self.assertEqual(["-model", "bunker"], tokens[3:5])
         self.assertEqual(1, sum(
             item.get("pkg") == "gazebo_ros" and
