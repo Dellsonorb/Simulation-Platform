@@ -65,6 +65,12 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
         sdf, "odometryFrame", "odom");
     robot_base_frame_ = ReadParameter<std::string>(
         sdf, "robotBaseFrame", "base_link");
+    base_link_ = model_->GetLink(StripLeadingSlash(robot_base_frame_));
+    if (!base_link_) {
+      gzerr << "BUNKER planar move cannot resolve base link "
+            << robot_base_frame_ << "\n";
+      return;
+    }
     odometry_rate_ = ReadParameter<double>(sdf, "odometryRate", 50.0);
     command_timeout_ = ReadParameter<double>(sdf, "cmdTimeout", 0.5);
     if (odometry_rate_ <= 0.0 || command_timeout_ < 0.0) {
@@ -112,6 +118,7 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
     odometry_publisher_.shutdown();
     tf_broadcaster_.reset();
     node_.reset();
+    base_link_.reset();
   }
 
   void RunCallbackQueue() {
@@ -156,11 +163,11 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
     const geometry_msgs::Twist command = CurrentCommand();
     const ignition::math::Pose3d pose = model_->WorldPose();
     const double yaw = pose.Rot().Yaw();
-    model_->SetLinearVel(ignition::math::Vector3d(
+    base_link_->SetLinearVel(ignition::math::Vector3d(
         command.linear.x * std::cos(yaw) - command.linear.y * std::sin(yaw),
         command.linear.y * std::cos(yaw) + command.linear.x * std::sin(yaw),
         0.0));
-    model_->SetAngularVel(ignition::math::Vector3d(
+    base_link_->SetAngularVel(ignition::math::Vector3d(
         0.0, 0.0, command.angular.z));
 
     const common::Time now = world_->SimTime();
@@ -205,6 +212,7 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
   }
 
   physics::ModelPtr model_;
+  physics::LinkPtr base_link_;
   physics::WorldPtr world_;
   event::ConnectionPtr update_connection_;
   std::unique_ptr<ros::NodeHandle> node_;

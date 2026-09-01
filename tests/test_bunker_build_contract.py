@@ -87,8 +87,12 @@ class BunkerRuntimePackageTest(unittest.TestCase):
         source = source_path.read_text(encoding="utf-8")
         self.assertIn("~BunkerPlanarMovePlugin", source)
         self.assertIn("callback_thread_.join()", source)
-        self.assertIn("SetLinearVel", source)
-        self.assertIn("SetAngularVel", source)
+        self.assertIn("GetLink(StripLeadingSlash(robot_base_frame_))", source)
+        self.assertIn("base_link_->SetLinearVel", source)
+        self.assertIn("base_link_->SetAngularVel", source)
+        self.assertNotIn("model_->SetLinearVel", source)
+        self.assertNotIn("model_->SetAngularVel", source)
+        self.assertNotIn("model_->SetWorldTwist", source)
         for forbidden in (
                 "SetWorldPose", "SetKinematic", "CreateJoint", "attachment",
                 "handoff", "AUBO", "AG95", "benchmark"):

@@ -4,8 +4,10 @@ import importlib.util
 import io
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 import xml.etree.ElementTree as ET
 from unittest import mock
@@ -40,6 +42,8 @@ MOVEIT_EXECUTION_LAUNCH = (
 MOVEIT_EXECUTE_TEST = MOVEIT_PACKAGE / "test/moveit_execute.test"
 LEGACY_SRDF = MOVEIT_PACKAGE / "config/bunker_aubo.srdf"
 LEGACY_CONTROLLERS = MOVEIT_PACKAGE / "config/controllers.yaml"
+GROUND_CHECKER = ROOT / "scripts/check_ground_manipulator_runtime.py"
+GROUND_SMOKE = ROOT / "scripts/smoke_ground_manipulator_standalone.bash"
 
 
 def _load_renderer():
@@ -69,7 +73,227 @@ def _load_startup():
     return module
 
 
+def _load_ground_checker():
+    if not GROUND_CHECKER.is_file():
+        raise AssertionError("ground manipulator runtime checker is missing")
+    spec = importlib.util.spec_from_file_location(
+        "check_ground_manipulator_runtime", str(GROUND_CHECKER))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 class GroundManipulatorPlatformTest(unittest.TestCase):
+    def test_ground_checker_rejects_stale_or_non_finite_joint_state(self):
+        checker = _load_ground_checker()
+
+        def joint_state(stamp=9.8, positions=None):
+            if positions is None:
+                positions = [0.0, -0.5, 1.0, 0.0, 1.0, 0.0, 0.1]
+            return SimpleNamespace(
+                header=SimpleNamespace(
+                    stamp=SimpleNamespace(to_sec=lambda: stamp)),
+                name=list(checker.ARM_JOINTS) + [checker.GRIPPER_JOINT],
+                position=positions,
+                velocity=[0.0] * 7,
+                effort=[0.0] * 7)
+
+        summary = checker.joint_state_summary(joint_state(), now=10.0)
+        self.assertAlmostEqual(0.2, summary["age_s"])
+        self.assertAlmostEqual(1.0, summary["positions"]["elbow_joint"])
+        with self.assertRaises(checker.RuntimeCheckError):
+            checker.joint_state_summary(joint_state(stamp=7.0), now=10.0)
+        invalid = joint_state()
+        invalid.position[2] = float("nan")
+        with self.assertRaises(checker.RuntimeCheckError):
+            checker.joint_state_summary(invalid, now=10.0)
+
+    def test_ground_checker_requires_real_running_controllers(self):
+        checker = _load_ground_checker()
+        controllers = [
+            SimpleNamespace(name=name, state="running", type="real/%s" % name)
+            for name in checker.REQUIRED_CONTROLLERS
+        ]
+        summary = checker.controller_summary(controllers)
+        self.assertEqual(
+            sorted(checker.REQUIRED_CONTROLLERS),
+            sorted(summary["running"]))
+        controllers[-1].state = "stopped"
+        with self.assertRaises(checker.RuntimeCheckError):
+            checker.controller_summary(controllers)
+
+    def test_ground_checker_bounds_goals_and_checks_final_positions(self):
+        checker = _load_ground_checker()
+        self.assertAlmostEqual(
+            0.15,
+            checker.bounded_joint_target(
+                current=0.05, delta=0.10, lower=-3.04, upper=3.04,
+                max_step=0.15))
+        with self.assertRaises(checker.RuntimeCheckError):
+            checker.bounded_joint_target(
+                current=0.0, delta=0.4, lower=-3.04, upper=3.04,
+                max_step=0.15)
+        self.assertTrue(checker.positions_within(
+            {"elbow_joint": 0.81}, {"elbow_joint": 0.8}, tolerance=0.02))
+        self.assertFalse(checker.positions_within(
+            {"elbow_joint": 0.9}, {"elbow_joint": 0.8}, tolerance=0.02))
+
+    def test_ground_scan_checks_the_forward_landmark_not_arm_self_returns(
+            self):
+        checker = _load_ground_checker()
+        sample_count = 720
+        angle_min = -3.141592653589793
+        increment = 2.0 * 3.141592653589793 / (sample_count - 1)
+        ranges = [float("inf")] * sample_count
+        ranges[20] = 0.22
+        for index in range(sample_count):
+            angle = angle_min + index * increment
+            if abs(angle) <= 0.08:
+                ranges[index] = 2.30
+        message = SimpleNamespace(
+            header=SimpleNamespace(
+                stamp=SimpleNamespace(to_sec=lambda: 9.8),
+                frame_id="ground/lidar_2d_link"),
+            ranges=ranges,
+            range_min=0.12,
+            range_max=8.0,
+            angle_min=angle_min,
+            angle_increment=increment)
+        summary = checker.ground_scan_summary(message, now=10.0)
+        self.assertAlmostEqual(0.22, summary["nearest_range_m"])
+        self.assertAlmostEqual(2.30, summary["forward_range_m"])
+        for index in range(sample_count):
+            angle = angle_min + index * increment
+            if abs(angle) <= 0.08:
+                ranges[index] = 0.3
+        with self.assertRaises(checker.RuntimeCheckError):
+            checker.ground_scan_summary(message, now=10.0)
+
+    def test_ground_checker_uses_one_subscription_for_advancing_sensor_data(
+            self):
+        checker = _load_ground_checker()
+
+        def message(stamp):
+            return SimpleNamespace(header=SimpleNamespace(
+                stamp=SimpleNamespace(to_sec=lambda: stamp),
+                frame_id="ground/d435_color_optical_frame"))
+
+        class Subscription:
+            unregistered = False
+
+            def unregister(self):
+                self.unregistered = True
+
+        subscription = Subscription()
+        options = {}
+
+        class FakeRospy:
+            @staticmethod
+            def is_shutdown():
+                return False
+
+            @staticmethod
+            def Subscriber(_topic, _message_type, callback, **kwargs):
+                options.update(kwargs)
+                callback(message(9.7))
+                callback(message(9.8))
+                return subscription
+
+        observed, summary = checker.wait_for_current_sensor(
+            FakeRospy, "/ground/d435/color/image_raw", object(),
+            lambda item: {"stamp": item.header.stamp.to_sec()}, 1.0)
+        self.assertEqual(9.8, observed.header.stamp.to_sec())
+        self.assertEqual(9.8, summary["stamp"])
+        self.assertTrue(subscription.unregistered)
+        self.assertEqual(1, options["queue_size"])
+        self.assertGreaterEqual(options["buff_size"], 16 * 1024 * 1024)
+
+    def test_ground_checker_keeps_depth_image_and_info_subscribed_together(
+            self):
+        checker = _load_ground_checker()
+        callbacks = {}
+        subscriptions = []
+
+        def message(stamp):
+            return SimpleNamespace(header=SimpleNamespace(
+                stamp=SimpleNamespace(to_sec=lambda: stamp)))
+
+        class Subscription:
+            def __init__(self):
+                self.unregistered = False
+
+            def unregister(self):
+                self.unregistered = True
+
+        class FakeRospy:
+            @staticmethod
+            def is_shutdown():
+                return False
+
+            @staticmethod
+            def Subscriber(topic, _message_type, callback, **_kwargs):
+                callbacks[topic] = callback
+                subscription = Subscription()
+                subscriptions.append(subscription)
+                if len(callbacks) == 2:
+                    for stamp in (9.7, 9.8):
+                        for receive in callbacks.values():
+                            receive(message(stamp))
+                return subscription
+
+        contracts = (
+            ("depth", "/depth/image", object(),
+             lambda item: {"stamp": item.header.stamp.to_sec()}),
+            ("depth_info", "/depth/camera_info", object(),
+             lambda item: {"stamp": item.header.stamp.to_sec()}),
+        )
+        _messages, summaries = checker.wait_for_current_sensors(
+            FakeRospy, contracts, 1.0)
+        self.assertEqual(9.8, summaries["depth"]["stamp"])
+        self.assertEqual(9.8, summaries["depth_info"]["stamp"])
+        self.assertTrue(all(item.unregistered for item in subscriptions))
+
+    def test_ground_checker_covers_public_runtime_without_shortcuts(self):
+        checker = _load_ground_checker()
+        source = GROUND_CHECKER.read_text(encoding="utf-8").lower()
+        self.assertEqual("ground_robot", checker.MODEL_NAME)
+        self.assertEqual({
+            "joint_state_controller", "arm_controller", "gripper_controller",
+        }, set(checker.REQUIRED_CONTROLLERS))
+        self.assertIn("ground/gripper_tcp_link", checker.GROUND_TF_FRAMES)
+        self.assertIn(
+            "ground/d435_depth_optical_frame", checker.GROUND_TF_FRAMES)
+        for text in (
+                "/ground/runtime_ready", "/ground/d435/depth/points",
+                "follow_joint_trajectory", "movegroupcommander",
+                "bunker.check_motion"):
+            self.assertIn(text, source)
+        for forbidden in (
+                "set_model_state", "teleport", "attach_link", "benchmark",
+                "provenance"):
+            self.assertNotIn(forbidden, source)
+
+    def test_ground_smoke_is_bounded_and_reports_after_teardown(self):
+        completed = subprocess.run(
+            [str(GROUND_SMOKE), "--help"], cwd=ROOT, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=5, check=False)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        source = GROUND_SMOKE.read_text(encoding="utf-8")
+        self.assertIn("moveit_planning_execution.launch", source)
+        self.assertIn("check_ground_manipulator_runtime.py", source)
+        self.assertIn("/usr/bin/timeout", source)
+        self.assertIn("rosparam get /use_sim_time", source)
+        self.assertIn("/clock", source)
+        self.assertIn('/bin/kill -INT "$launch_pid"', source)
+        checker = source.index("check_ground_manipulator_runtime.py")
+        timeout = source.rfind("/usr/bin/timeout", 0, checker)
+        self.assertGreater(timeout, source.index("setsid roslaunch"))
+        self.assertGreater(source.index("PASS: Ground manipulator"),
+                           source.index("with_bunker_env.bash"))
+        self.assertNotIn("benchmark", source.lower())
+        self.assertNotIn("evidence", source.lower())
+
     def test_moveit_layer_uses_ground_frames_and_real_namespaced_controllers(
             self):
         for path in (
@@ -478,14 +702,17 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
             depth_plugin.findtext("depthImageCameraInfoTopicName"))
         self.assertEqual(
             "points", depth_plugin.findtext("pointCloudTopicName"))
+        lidar_joint = root.find("./joint[@name='lidar_2d_joint']")
+        self.assertEqual(
+            "0.45 0 0.25", lidar_joint.find("origin").get("xyz"))
         self.assertEqual(
             renderer.BASE_COLLISION_SIZE,
             root.find(
                 "./link[@name='ground/base_link']/collision/geometry/box"
             ).get("size"))
         base_surface = root.find("./gazebo[@reference='ground/base_link']")
-        self.assertEqual("1.0", base_surface.findtext("mu1"))
-        self.assertEqual("1.0", base_surface.findtext("mu2"))
+        self.assertEqual("0.0", base_surface.findtext("mu1"))
+        self.assertEqual("0.0", base_surface.findtext("mu2"))
 
         lowered = payload.lower()
         for token in (
@@ -602,7 +829,7 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
             [item.findtext("uri") for item in world.findall("include")])
         obstacle = world.find("./model[@name='ground_scan_obstacle']")
         self.assertIsNotNone(obstacle)
-        self.assertEqual("2.0 0.0 0.5 0 0 0", obstacle.findtext("pose"))
+        self.assertEqual("3.0 0.0 0.5 0 0 0", obstacle.findtext("pose"))
 
         runtime_text = "\n".join(
             path.read_text(encoding="utf-8").lower()
