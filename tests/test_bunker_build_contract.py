@@ -10,6 +10,8 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -380,3 +382,83 @@ class BunkerPackageContractTest(unittest.TestCase):
             r"DESTINATION\s+\$\{CATKIN_PACKAGE_SHARE_DESTINATION\}\s*\)",
         )
         self.assertNotRegex(source, r"DIRECTORY[^\)]*(launch|rviz|config)")
+
+    def test_runtime_cmake_test_surface_is_exact(self):
+        source = _read("src/platform/bunker_sim_runtime/CMakeLists.txt")
+        self.assertEqual(1, len(re.findall(
+            r"if\s*\(\s*CATKIN_ENABLE_TESTING\s*\)", source)))
+        self.assertRegex(
+            source,
+            r"(?s)if\s*\(\s*CATKIN_ENABLE_TESTING\s*\).*?"
+            r"find_package\s*\(\s*rostest\s+REQUIRED\s*\).*?"
+            r"add_rostest\s*\(\s*test/tf_prefix_contract\.test\s*\).*?"
+            r"endif\s*\(\s*\)",
+        )
+        self.assertEqual([
+            "test/test_contracts.py",
+            "test/test_sim_time.py",
+            "test/test_velocity_guard.py",
+            "test/test_spawn_bunker_preflight.py",
+            "test/test_renderer.py",
+            "test/test_launch_contract.py",
+        ], re.findall(
+            r"catkin_add_nosetests\s*\(\s*([^\s\)]+)\s*\)", source))
+
+    def test_runtime_cmake_install_surface_is_exact(self):
+        source = _read("src/platform/bunker_sim_runtime/CMakeLists.txt")
+        catkin_install = re.search(
+            r"catkin_install_python\s*\((.*?)\)", source, re.DOTALL)
+        self.assertIsNotNone(catkin_install)
+        self.assertEqual(
+            ["PROGRAMS", "scripts/velocity_guard.py", "DESTINATION",
+             "${CATKIN_PACKAGE_BIN_DESTINATION}"],
+            catkin_install.group(1).split(),
+        )
+        self.assertNotIn("render_bunker_runtime.py", catkin_install.group(1))
+        self.assertNotIn("spawn_bunker_preflight.py", catkin_install.group(1))
+
+        share_scripts = re.search(
+            r"install\s*\(\s*PROGRAMS\s+"
+            r"scripts/render_bunker_runtime\.py\s+"
+            r"scripts/spawn_bunker_preflight\.py\s+"
+            r"DESTINATION\s+"
+            r"\$\{CATKIN_PACKAGE_SHARE_DESTINATION\}/scripts\s*\)",
+            source,
+        )
+        self.assertIsNotNone(share_scripts)
+        self.assertNotIn("velocity_guard.py", share_scripts.group(0))
+        self.assertRegex(
+            source,
+            r"install\s*\(\s*DIRECTORY\s+launch\s+worlds\s+"
+            r"DESTINATION\s+\$\{CATKIN_PACKAGE_SHARE_DESTINATION\}\s*\)",
+        )
+
+
+class BunkerBuildProfileContractTest(unittest.TestCase):
+    EXPECTED_PROFILE = {
+        "source_space": "src",
+        "build_space": "build/p450-clean",
+        "devel_space": "devel/p450-clean",
+        "install": True,
+        "install_space": "install/p450-clean",
+        "isolate_install": False,
+        "extend_path": "/opt/ros/noetic",
+        "use_env_cache": False,
+        "cmake_args": [
+            "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+            "-DPYTHON_EXECUTABLE=/usr/bin/python3",
+        ],
+    }
+
+    def test_p450_clean_profile_has_the_exact_bunker_build_invariants(self):
+        path = ROOT / ".catkin_tools/profiles/p450-clean/config.yaml"
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+        self.assertIs(type(payload), dict)
+        for key, expected in self.EXPECTED_PROFILE.items():
+            with self.subTest(key=key):
+                self.assertIn(key, payload)
+                self.assertIs(type(payload[key]), type(expected))
+                if isinstance(expected, list):
+                    self.assertTrue(all(
+                        type(item) is str for item in payload[key]))
+                self.assertEqual(expected, payload[key])
