@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="pick_target">
+    <static>false</static>
+    <self_collide>false</self_collide>
+    <allow_auto_disable>false</allow_auto_disable>
+    <link name="pick_target_link">
+      <inertial>
+        <mass>0.20</mass>
+        <inertia>
+          <ixx>0.0002672333</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.0011804167</iyy>
+          <iyz>0</iyz>
+          <izz>0.0010068167</izz>
+        </inertia>
+      </inertial>
+      <collision name="pick_target_collision">
+        <geometry><box><size>0.240 0.053 0.115</size></box></geometry>
+        <surface>
+          <friction>
+            <ode><mu>2.0</mu><mu2>2.0</mu2></ode>
+          </friction>
+          <contact>
+            <ode><kp>1000000.0</kp><kd>10.0</kd><max_vel>0.02</max_vel><min_depth>0.001</min_depth></ode>
+          </contact>
+        </surface>
+      </collision>
+      <visual name="pick_target_visual">
+        <geometry><box><size>0.240 0.053 0.115</size></box></geometry>
+        <material>
+          <ambient>0.85 0.03 0.02 1</ambient>
+          <diffuse>0.85 0.03 0.02 1</diffuse>
+          <specular>0.05 0.01 0.01 1</specular>
+        </material>
+      </visual>
+      <sensor name="pick_target_contact_sensor" type="contact">
+        <always_on>true</always_on>
+        <update_rate>100.0</update_rate>
+        <contact><collision>pick_target_collision</collision></contact>
+        <plugin name="pick_target_contact_publisher"
+                filename="libgazebo_ros_bumper.so">
+          <robotNamespace>/pick_target</robotNamespace>
+          <bumperTopicName>/pick_target/contacts</bumperTopicName>
+          <frameName>world</frameName>
+        </plugin>
+      </sensor>
+    </link>
+  </model>
+</sdf>
