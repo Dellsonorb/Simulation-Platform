@@ -8,8 +8,8 @@
       <uri>model://sun</uri>
     </include>
 
-    <!-- BUNKER starts at x=3.0, so this landmark is about 2.05 m ahead of
-         its rear-mounted 2D LiDAR. -->
+    <!-- Ground Robot starts at x=3.0, so this landmark is about 1.30 m ahead
+         of its front-mounted 2D LiDAR. -->
     <model name="ground_scan_obstacle">
       <static>true</static>
       <pose>5.0 0.0 0.5 0 0 0</pose>

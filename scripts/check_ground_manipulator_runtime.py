@@ -251,7 +251,8 @@ def point_cloud_summary(message, expected_frame, now):
     return summary
 
 
-def ground_scan_summary(message, now):
+def ground_scan_summary(
+        message, now, forward_range_bounds=(2.0, 2.6)):
     summary = air_ground.sensor_header_summary(
         message, "ground/lidar_2d_link", now)
     if len(message.ranges) != 720:
@@ -272,7 +273,11 @@ def ground_scan_summary(message, now):
     forward_range = (
         forward[midpoint] if len(forward) % 2 else
         0.5 * (forward[midpoint - 1] + forward[midpoint]))
-    if not 2.0 <= forward_range <= 2.6:
+    lower, upper = forward_range_bounds
+    if (not _finite((lower, upper)) or lower < message.range_min or
+            upper > message.range_max or lower >= upper):
+        raise RuntimeCheckError("/ground/scan forward bounds are invalid")
+    if not lower <= forward_range <= upper:
         raise RuntimeCheckError(
             "/ground/scan forward landmark is %.3f m" % forward_range)
     summary.update({
@@ -284,11 +289,13 @@ def ground_scan_summary(message, now):
     return summary
 
 
-def check_ground_scan(rospy, laser_scan_type, timeout):
+def check_ground_scan(
+        rospy, laser_scan_type, timeout,
+        forward_range_bounds=(2.0, 2.6)):
     _message, summary = wait_for_current_sensor(
         rospy, "/ground/scan", laser_scan_type,
         lambda item: ground_scan_summary(
-            item, rospy.Time.now().to_sec()),
+            item, rospy.Time.now().to_sec(), forward_range_bounds),
         timeout, buffer_bytes=1024 * 1024)
     return summary
 

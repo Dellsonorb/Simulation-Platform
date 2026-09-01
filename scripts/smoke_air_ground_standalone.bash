@@ -93,7 +93,7 @@ cleanup() {
     status=1
   fi
   if [[ "$status" -eq 0 && "$checks_complete" == true ]]; then
-    echo "PASS: P450 + BUNKER shared-world smoke"
+    echo "PASS: P450 + Ground Robot shared-world smoke"
     echo "Summary: $run_dir/summary.json"
   fi
   exit "$status"

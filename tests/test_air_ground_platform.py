@@ -34,18 +34,25 @@ class AirGroundPlatformTest(unittest.TestCase):
         self.assertIn(
             "$(find sim_platform_bringup)/launch/p450_runtime.launch", files)
         self.assertIn(
+            "$(find ground_manipulator_runtime)/launch/ground_robot_runtime.launch",
+            files)
+        self.assertNotIn(
             "$(find bunker_sim_runtime)/launch/bunker_runtime.launch", files)
 
-        bunker = next(include for include in includes
-                      if "bunker_runtime.launch" in include.get("file"))
-        bunker_args = {arg.get("name"): arg.get("value")
-                       for arg in bunker.findall("arg")}
-        self.assertEqual("$(arg bunker_x)", bunker_args["x"])
-        self.assertEqual("$(arg bunker_y)", bunker_args["y"])
+        ground = next(include for include in includes
+                      if "ground_robot_runtime.launch" in include.get("file"))
+        ground_args = {arg.get("name"): arg.get("value")
+                       for arg in ground.findall("arg")}
+        self.assertEqual("$(arg bunker_x)", ground_args["x"])
+        self.assertEqual("$(arg bunker_y)", ground_args["y"])
+        self.assertEqual("$(arg bunker_z)", ground_args["z"])
+        self.assertEqual("$(arg bunker_yaw)", ground_args["yaw"])
 
         for runtime in (
                 PACKAGE / "launch/p450_runtime.launch",
-                ROOT / "src/platform/bunker_sim_runtime/launch/bunker_runtime.launch"):
+                ROOT / (
+                    "src/platform/ground_manipulator_runtime/launch/"
+                    "ground_robot_runtime.launch")):
             runtime_root = ET.parse(str(runtime)).getroot()
             self.assertFalse(any("empty_world.launch" in include.get("file", "")
                                  for include in runtime_root.findall(".//include")))
@@ -60,13 +67,14 @@ class AirGroundPlatformTest(unittest.TestCase):
         self.assertIsNotNone(obstacle)
         self.assertEqual("5.0 0.0 0.5 0 0 0", obstacle.findtext("pose"))
 
-    def test_bringup_installs_world_and_depends_on_bunker_runtime(self):
+    def test_bringup_installs_world_and_depends_on_ground_runtime(self):
         cmake = (PACKAGE / "CMakeLists.txt").read_text(encoding="utf-8")
         self.assertIn("DIRECTORY worlds", cmake)
         dependencies = {
             item.text for item in ET.parse(str(PACKAGE_XML)).getroot().findall(
                 "exec_depend")}
-        self.assertIn("bunker_sim_runtime", dependencies)
+        self.assertIn("ground_manipulator_runtime", dependencies)
+        self.assertNotIn("bunker_sim_runtime", dependencies)
 
     def test_checker_rejects_stale_or_wrong_frame_sensor_data(self):
         checker = _load_checker()
@@ -212,9 +220,60 @@ class AirGroundPlatformTest(unittest.TestCase):
 
         self.assertIn("uav1/camera_imu_link", checker.AIR_TF_FRAMES)
         self.assertIn("uav1/camera_color_optical_frame", checker.AIR_TF_FRAMES)
-        self.assertEqual(
-            ("ground/base_link", "ground/lidar_2d_link"),
-            checker.GROUND_TF_FRAMES)
+        self.assertEqual({
+            "ground/base_link",
+            "ground/lidar_2d_link",
+            "ground/aubo_i5_base_link",
+            "ground/ee_link",
+            "ground/d435_color_optical_frame",
+            "ground/d435_depth_optical_frame",
+            "ground/gripper_tcp_link",
+            "ground/left_finger_pad",
+            "ground/right_finger_pad",
+        }, set(checker.GROUND_TF_FRAMES))
+
+    def test_checker_requires_the_complete_ground_runtime(self):
+        checker = _load_checker()
+        source = CHECKER.read_text(encoding="utf-8")
+        self.assertEqual("ground_robot", checker.GROUND_MODEL_NAME)
+        self.assertEqual((1.0, 1.6), checker.GROUND_SCAN_FORWARD_RANGE_M)
+        for required in (
+                "ground.check_runtime_ready", "ground.check_controllers",
+                "ground.current_joint_state", "ground.joint_state_summary",
+                "ground.check_sensors", "ground.check_ground_scan",
+                "bunker.check_motion"):
+            self.assertIn(required, source)
+        for forbidden in (
+                "set_model_state", "teleport", "attach_link", "benchmark",
+                "provenance"):
+            self.assertNotIn(forbidden, source.lower())
+
+    def test_checker_validates_ground_joint_state_immediately_after_read(self):
+        checker = _load_checker()
+        message = object()
+        calls = []
+
+        class FakeRospy:
+            class Time:
+                @staticmethod
+                def now():
+                    return SimpleNamespace(to_sec=lambda: 10.0)
+
+        class FakeGround:
+            @staticmethod
+            def current_joint_state(rospy, joint_state_type, timeout):
+                calls.append((rospy, joint_state_type, timeout))
+                return message
+
+            @staticmethod
+            def joint_state_summary(observed, now):
+                calls.append((observed, now))
+                return {"age_s": 0.1}
+
+        summary = checker.check_ground_joints(
+            FakeRospy, FakeGround, object, 5.0)
+        self.assertEqual({"age_s": 0.1}, summary)
+        self.assertEqual((message, 10.0), calls[-1])
 
     def test_smoke_is_bounded_and_uses_the_platform_environment(self):
         source = SMOKE.read_text(encoding="utf-8")
@@ -229,6 +288,7 @@ class AirGroundPlatformTest(unittest.TestCase):
         self.assertIn(
             'if [[ "$status" -eq 0 && "$checks_complete" == true ]]; then',
             source)
+        self.assertIn("PASS: P450 + Ground Robot shared-world smoke", source)
         self.assertEqual("checks_complete=true", source.rstrip().splitlines()[-1])
         self.assertNotIn("benchmark", source.lower())
         self.assertNotIn("evidence", source.lower())

@@ -165,6 +165,13 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
         for index in range(sample_count):
             angle = angle_min + index * increment
             if abs(angle) <= 0.08:
+                ranges[index] = 1.30
+        shared_summary = checker.ground_scan_summary(
+            message, now=10.0, forward_range_bounds=(1.0, 1.6))
+        self.assertAlmostEqual(1.30, shared_summary["forward_range_m"])
+        for index in range(sample_count):
+            angle = angle_min + index * increment
+            if abs(angle) <= 0.08:
                 ranges[index] = 0.3
         with self.assertRaises(checker.RuntimeCheckError):
             checker.ground_scan_summary(message, now=10.0)

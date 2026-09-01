@@ -35,7 +35,8 @@
     <arg name="enable_mid360" value="$(arg enable_mid360)"/>
   </include>
 
-  <include file="$(find bunker_sim_runtime)/launch/bunker_runtime.launch">
+  <include
+    file="$(find ground_manipulator_runtime)/launch/ground_robot_runtime.launch">
     <arg name="x" value="$(arg bunker_x)"/>
     <arg name="y" value="$(arg bunker_y)"/>
     <arg name="z" value="$(arg bunker_z)"/>

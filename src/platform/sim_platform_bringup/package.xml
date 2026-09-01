@@ -11,7 +11,7 @@
 
   <exec_depend>gazebo_plugins</exec_depend>
   <exec_depend>gazebo_ros</exec_depend>
-  <exec_depend>bunker_sim_runtime</exec_depend>
+  <exec_depend>ground_manipulator_runtime</exec_depend>
   <exec_depend>livox_laser_gazebo_plugins</exec_depend>
   <exec_depend>mavros</exec_depend>
   <exec_depend>prometheus_gazebo</exec_depend>

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the P450 and BUNKER interfaces in one running Gazebo world."""
+"""Check P450 and the complete Ground Robot in one running Gazebo world."""
 
 import argparse
 from collections import deque
@@ -17,6 +17,8 @@ import check_bunker_runtime as bunker
 
 
 RuntimeCheckError = bunker.RuntimeCheckError
+GROUND_MODEL_NAME = "ground_robot"
+GROUND_SCAN_FORWARD_RANGE_M = (1.0, 1.6)
 
 AIR_TF_FRAMES = (
     "uav1/base_link",
@@ -32,6 +34,13 @@ AIR_TF_FRAMES = (
 GROUND_TF_FRAMES = (
     "ground/base_link",
     "ground/lidar_2d_link",
+    "ground/aubo_i5_base_link",
+    "ground/ee_link",
+    "ground/d435_color_optical_frame",
+    "ground/d435_depth_optical_frame",
+    "ground/gripper_tcp_link",
+    "ground/left_finger_pad",
+    "ground/right_finger_pad",
 )
 
 
@@ -153,11 +162,11 @@ def wait_for_current_sensor(rospy, topic, message_type, frame, timeout):
 
 
 def check_models(rospy, model_states_type, timeout):
-    required = {"p450_D435i_0", "bunker"}
+    required = {"p450_D435i_0", GROUND_MODEL_NAME}
     message = wait_for_condition(
         rospy, "/gazebo/model_states", model_states_type,
         lambda item: required.issubset(set(item.name)), timeout,
-        "P450 and BUNKER Gazebo models")
+        "P450 and Ground Robot Gazebo models")
     return sorted(required.intersection(message.name))
 
 
@@ -264,16 +273,28 @@ def check_ground_tf(rospy, tf2_ros, timeout):
         rospy, tf2_ros, GROUND_TF_FRAMES, timeout)
 
 
+def check_ground_joints(
+        rospy, ground, joint_state_type, timeout):
+    message = ground.current_joint_state(
+        rospy, joint_state_type, timeout)
+    return ground.joint_state_summary(
+        message, rospy.Time.now().to_sec())
+
+
 def run_checks(timeout):
     try:
+        import check_ground_manipulator_runtime as ground
         import rospy
         import tf2_ros
+        from controller_manager_msgs.srv import ListControllers
         from gazebo_msgs.msg import ModelStates
         from geometry_msgs.msg import Twist
         from mavros_msgs.msg import State
         from nav_msgs.msg import Odometry
         from prometheus_msgs.msg import UAVState
-        from sensor_msgs.msg import CameraInfo, Image, Imu, LaserScan
+        from sensor_msgs.msg import (
+            CameraInfo, Image, Imu, JointState, LaserScan, PointCloud2)
+        from std_msgs.msg import Bool
     except ImportError as error:
         raise RuntimeCheckError("ROS Python environment is incomplete: %s" % error)
 
@@ -285,26 +306,35 @@ def run_checks(timeout):
             raise RuntimeCheckError("simulation clock did not start")
         time.sleep(0.05)
 
-    return {
-        "models": check_models(rospy, ModelStates, timeout),
-        "p450": {
-            "state": check_p450_state(rospy, State, UAVState, timeout),
-            "sensors": check_p450_sensors(
-                rospy, Image, CameraInfo, Imu, timeout),
-            "tf": check_air_tf(rospy, tf2_ros, timeout),
-        },
-        "bunker": {
-            "scan": bunker.check_scan(rospy, LaserScan, timeout),
-            "tf": check_ground_tf(rospy, tf2_ros, timeout),
-            "motion": bunker.check_motion(
-                rospy, Odometry, Twist, timeout),
-        },
+    checks = {"models": check_models(rospy, ModelStates, timeout)}
+    checks["p450"] = {
+        "state": check_p450_state(rospy, State, UAVState, timeout),
+        "sensors": check_p450_sensors(
+            rospy, Image, CameraInfo, Imu, timeout),
+        "tf": check_air_tf(rospy, tf2_ros, timeout),
     }
+    checks["ground"] = {
+        "runtime_ready": ground.check_runtime_ready(
+            rospy, Bool, timeout),
+        "controllers": ground.check_controllers(
+            rospy, ListControllers, timeout),
+        "joints": check_ground_joints(
+            rospy, ground, JointState, timeout),
+        "d435": ground.check_sensors(
+            rospy, Image, CameraInfo, PointCloud2, timeout),
+        "scan": ground.check_ground_scan(
+            rospy, LaserScan, timeout,
+            forward_range_bounds=GROUND_SCAN_FORWARD_RANGE_M),
+        "tf": check_ground_tf(rospy, tf2_ros, timeout),
+        "motion": bunker.check_motion(
+            rospy, Odometry, Twist, timeout),
+    }
+    return checks
 
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(
-        description="Check a joint P450 and BUNKER Gazebo runtime")
+        description="Check a joint P450 and Ground Robot Gazebo runtime")
     parser.add_argument("--summary", help="write a compact JSON summary")
     parser.add_argument("--timeout", type=float, default=30.0)
     return parser.parse_args(argv)
