@@ -1,0 +1,44 @@
+<launch>
+  <arg name="gui" default="false"/>
+  <arg name="use_sim_time" default="true"/>
+  <arg name="world"
+    default="$(find sim_platform_bringup)/worlds/air_ground_v1.world"/>
+
+  <arg name="uav1_init_x" default="0.0"/>
+  <arg name="uav1_init_y" default="0.0"/>
+  <arg name="uav1_init_z" default="0.15"/>
+  <arg name="uav1_init_yaw" default="0.0"/>
+  <arg name="px4_workdir" default="sitl_air_ground_0"/>
+  <arg name="enable_mid360" default="false"/>
+
+  <arg name="bunker_x" default="3.0"/>
+  <arg name="bunker_y" default="0.0"/>
+  <arg name="bunker_z" default="0.36"/>
+  <arg name="bunker_yaw" default="0.0"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(arg world)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="paused" value="false"/>
+    <arg name="debug" value="false"/>
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+    <arg name="server_required" value="true"/>
+  </include>
+
+  <include file="$(find sim_platform_bringup)/launch/p450_runtime.launch">
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+    <arg name="uav1_init_x" value="$(arg uav1_init_x)"/>
+    <arg name="uav1_init_y" value="$(arg uav1_init_y)"/>
+    <arg name="uav1_init_z" value="$(arg uav1_init_z)"/>
+    <arg name="uav1_init_yaw" value="$(arg uav1_init_yaw)"/>
+    <arg name="px4_workdir" value="$(arg px4_workdir)"/>
+    <arg name="enable_mid360" value="$(arg enable_mid360)"/>
+  </include>
+
+  <include file="$(find bunker_sim_runtime)/launch/bunker_runtime.launch">
+    <arg name="x" value="$(arg bunker_x)"/>
+    <arg name="y" value="$(arg bunker_y)"/>
+    <arg name="z" value="$(arg bunker_z)"/>
+    <arg name="yaw" value="$(arg bunker_yaw)"/>
+  </include>
+</launch>

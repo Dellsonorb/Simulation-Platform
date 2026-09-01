@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+
+import importlib.util
+from pathlib import Path
+from types import SimpleNamespace
+import unittest
+import xml.etree.ElementTree as ET
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGE = ROOT / "src/platform/sim_platform_bringup"
+LAUNCH = PACKAGE / "launch/air_ground_standalone.launch"
+WORLD = PACKAGE / "worlds/air_ground_v1.world"
+PACKAGE_XML = PACKAGE / "package.xml"
+CHECKER = ROOT / "scripts/check_air_ground_runtime.py"
+SMOKE = ROOT / "scripts/smoke_air_ground_standalone.bash"
+
+
+def _load_checker():
+    spec = importlib.util.spec_from_file_location(
+        "check_air_ground_runtime", str(CHECKER))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class AirGroundPlatformTest(unittest.TestCase):
+    def test_shared_launch_owns_one_gazebo_and_two_worldless_runtimes(self):
+        root = ET.parse(str(LAUNCH)).getroot()
+        includes = root.findall("include")
+        files = [include.get("file") for include in includes]
+        self.assertEqual(1, files.count(
+            "$(find gazebo_ros)/launch/empty_world.launch"))
+        self.assertIn(
+            "$(find sim_platform_bringup)/launch/p450_runtime.launch", files)
+        self.assertIn(
+            "$(find bunker_sim_runtime)/launch/bunker_runtime.launch", files)
+
+        bunker = next(include for include in includes
+                      if "bunker_runtime.launch" in include.get("file"))
+        bunker_args = {arg.get("name"): arg.get("value")
+                       for arg in bunker.findall("arg")}
+        self.assertEqual("$(arg bunker_x)", bunker_args["x"])
+        self.assertEqual("$(arg bunker_y)", bunker_args["y"])
+
+        for runtime in (
+                PACKAGE / "launch/p450_runtime.launch",
+                ROOT / "src/platform/bunker_sim_runtime/launch/bunker_runtime.launch"):
+            runtime_root = ET.parse(str(runtime)).getroot()
+            self.assertFalse(any("empty_world.launch" in include.get("file", "")
+                                 for include in runtime_root.findall(".//include")))
+
+    def test_shared_world_provides_ground_and_a_lidar_landmark(self):
+        root = ET.parse(str(WORLD)).getroot()
+        world = root.find("world")
+        self.assertIsNotNone(world)
+        uris = [include.findtext("uri") for include in world.findall("include")]
+        self.assertIn("model://ground_plane", uris)
+        obstacle = world.find("./model[@name='ground_scan_obstacle']")
+        self.assertIsNotNone(obstacle)
+        self.assertEqual("5.0 0.0 0.5 0 0 0", obstacle.findtext("pose"))
+
+    def test_bringup_installs_world_and_depends_on_bunker_runtime(self):
+        cmake = (PACKAGE / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("DIRECTORY worlds", cmake)
+        dependencies = {
+            item.text for item in ET.parse(str(PACKAGE_XML)).getroot().findall(
+                "exec_depend")}
+        self.assertIn("bunker_sim_runtime", dependencies)
+
+    def test_checker_rejects_stale_or_wrong_frame_sensor_data(self):
+        checker = _load_checker()
+        stamp = SimpleNamespace(to_sec=lambda: 9.8)
+        valid = SimpleNamespace(
+            header=SimpleNamespace(
+                stamp=stamp, frame_id="uav1/camera_depth_frame"))
+        result = checker.sensor_header_summary(
+            valid, "uav1/camera_depth_frame", now=10.0)
+        self.assertAlmostEqual(0.2, result["age_s"])
+        slash_prefixed = SimpleNamespace(
+            header=SimpleNamespace(
+                stamp=stamp, frame_id="/uav1/camera_depth_frame"))
+        self.assertEqual(
+            "uav1/camera_depth_frame",
+            checker.sensor_header_summary(
+                slash_prefixed, "uav1/camera_depth_frame", now=10.0)["frame"])
+
+        wrong = SimpleNamespace(
+            header=SimpleNamespace(stamp=stamp, frame_id="camera_depth_frame"))
+        with self.assertRaises(checker.RuntimeCheckError):
+            checker.sensor_header_summary(
+                wrong, "uav1/camera_depth_frame", now=10.0)
+        with self.assertRaisesRegex(
+                checker.RuntimeCheckError,
+                r"stamp=9\.800000, now=12\.000000, age=2\.200s"):
+            checker.sensor_header_summary(
+                valid, "uav1/camera_depth_frame", now=12.0)
+
+    def test_checker_keeps_one_sensor_subscription_for_two_frames(self):
+        checker = _load_checker()
+        checker_source = CHECKER.read_text(encoding="utf-8")
+
+        def message(stamp):
+            return SimpleNamespace(header=SimpleNamespace(
+                stamp=SimpleNamespace(to_sec=lambda: stamp),
+                frame_id="uav1/camera_link"))
+
+        class Subscription:
+            unregistered = False
+
+            def unregister(self):
+                self.unregistered = True
+
+        subscription = Subscription()
+        subscription_options = {}
+
+        class FakeRospy:
+            class Time:
+                @staticmethod
+                def now():
+                    return SimpleNamespace(to_sec=lambda: 10.0)
+
+            @staticmethod
+            def is_shutdown():
+                return False
+
+            @staticmethod
+            def Subscriber(_topic, _message_type, callback, **kwargs):
+                subscription_options.update(kwargs)
+                callback(message(9.7))
+                callback(message(9.8))
+                return subscription
+
+        observed, summary = checker.wait_for_current_sensor(
+            FakeRospy, "/camera", object(), "uav1/camera_link", 1.0)
+        self.assertEqual(9.8, observed.header.stamp.to_sec())
+        self.assertAlmostEqual(0.2, summary["age_s"])
+        self.assertTrue(subscription.unregistered)
+        self.assertEqual(1, subscription_options["queue_size"])
+        self.assertEqual(4 * 1024 * 1024, subscription_options["buff_size"])
+        self.assertTrue(subscription_options["tcp_nodelay"])
+        self.assertIn("messages_lock = threading.Lock()", checker_source)
+        self.assertIn("with messages_lock:", checker_source)
+
+    def test_checker_rejects_non_finite_p450_odometry(self):
+        checker = _load_checker()
+        valid = SimpleNamespace(
+            connected=True, odom_valid=True, position=[0.0, -0.1, 0.2])
+        invalid = SimpleNamespace(
+            connected=True, odom_valid=True,
+            position=[0.0, float("nan"), 0.2])
+        self.assertTrue(checker.valid_p450_state(valid))
+        self.assertFalse(checker.valid_p450_state(invalid))
+
+    def test_smoke_is_bounded_and_uses_the_platform_environment(self):
+        source = SMOKE.read_text(encoding="utf-8")
+        self.assertIn("scripts/with_p450_env.bash", source)
+        self.assertIn("air_ground_standalone.launch", source)
+        self.assertIn("check_air_ground_runtime.py", source)
+        self.assertIn("/usr/bin/timeout", source)
+        self.assertIn("rosparam get /use_sim_time", source)
+        self.assertIn("/clock", source)
+        self.assertIn('/bin/kill -INT "$launch_pid"', source)
+        self.assertIn("checks_complete=false", source)
+        self.assertIn(
+            'if [[ "$status" -eq 0 && "$checks_complete" == true ]]; then',
+            source)
+        self.assertEqual("checks_complete=true", source.rstrip().splitlines()[-1])
+        self.assertNotIn("benchmark", source.lower())
+        self.assertNotIn("evidence", source.lower())
+
+
+if __name__ == "__main__":
+    unittest.main()
