@@ -29,6 +29,17 @@ RUNTIME_LAUNCH = PACKAGE / "launch/ground_robot_runtime.launch"
 STANDALONE_LAUNCH = PACKAGE / "launch/ground_robot_standalone.launch"
 WORLD = PACKAGE / "worlds/ground_robot.world"
 AG95_CMAKE = ROOT / "src/vendor/dh_ag95_description/CMakeLists.txt"
+MOVEIT_PACKAGE = ROOT / "src/ground/bunker_aubo_moveit_config"
+MOVEIT_PACKAGE_XML = MOVEIT_PACKAGE / "package.xml"
+GROUND_SRDF = MOVEIT_PACKAGE / "config/ground_robot.srdf"
+GROUND_MOVEIT_CONTROLLERS = (
+    MOVEIT_PACKAGE / "config/ground_controllers.yaml")
+GROUND_MOVE_GROUP = MOVEIT_PACKAGE / "launch/ground_move_group.launch"
+MOVEIT_EXECUTION_LAUNCH = (
+    MOVEIT_PACKAGE / "launch/moveit_planning_execution.launch")
+MOVEIT_EXECUTE_TEST = MOVEIT_PACKAGE / "test/moveit_execute.test"
+LEGACY_SRDF = MOVEIT_PACKAGE / "config/bunker_aubo.srdf"
+LEGACY_CONTROLLERS = MOVEIT_PACKAGE / "config/controllers.yaml"
 
 
 def _load_renderer():
@@ -59,6 +70,90 @@ def _load_startup():
 
 
 class GroundManipulatorPlatformTest(unittest.TestCase):
+    def test_moveit_layer_uses_ground_frames_and_real_namespaced_controllers(
+            self):
+        for path in (
+                MOVEIT_PACKAGE_XML, GROUND_SRDF, GROUND_MOVEIT_CONTROLLERS,
+                GROUND_MOVE_GROUP, MOVEIT_EXECUTION_LAUNCH,
+                MOVEIT_EXECUTE_TEST):
+            self.assertTrue(path.is_file(), "%s is missing" % path.name)
+        self.assertFalse(LEGACY_SRDF.exists())
+        self.assertFalse(LEGACY_CONTROLLERS.exists())
+
+        package_root = ET.parse(str(MOVEIT_PACKAGE_XML)).getroot()
+        dependencies = {
+            item.text for item in package_root.findall("exec_depend")}
+        self.assertTrue({
+            "ground_manipulator_runtime", "moveit_kinematics",
+            "moveit_planners_ompl", "moveit_ros_move_group",
+            "moveit_ros_planning", "moveit_simple_controller_manager",
+        }.issubset(dependencies))
+        self.assertTrue({
+            "bunker_aubo_description", "bunker_aubo_gazebo",
+            "moveit_fake_controller_manager",
+        }.isdisjoint(dependencies))
+
+        srdf = ET.parse(str(GROUND_SRDF)).getroot()
+        self.assertEqual("bunker_aubo", srdf.get("name"))
+        chain = srdf.find("./group[@name='manipulator']/chain")
+        self.assertEqual("ground/aubo_i5_base_link", chain.get("base_link"))
+        self.assertEqual("ground/gripper_tcp_link", chain.get("tip_link"))
+        end_effector = srdf.find("./end_effector[@name='ag95']")
+        self.assertEqual("ground/ee_link", end_effector.get("parent_link"))
+        for collision in srdf.findall("disable_collisions"):
+            self.assertTrue(collision.get("link1").startswith("ground/"))
+            self.assertTrue(collision.get("link2").startswith("ground/"))
+
+        controllers = yaml.safe_load(
+            GROUND_MOVEIT_CONTROLLERS.read_text(encoding="utf-8"))
+        controller_list = controllers["controller_list"]
+        self.assertEqual({
+            "/ground/arm_controller", "/ground/gripper_controller",
+        }, {item["name"] for item in controller_list})
+        self.assertTrue(all(
+            item["type"] == "FollowJointTrajectory"
+            and item["action_ns"] == "follow_joint_trajectory"
+            and item["default"]
+            for item in controller_list))
+
+        launch = ET.parse(str(GROUND_MOVE_GROUP)).getroot()
+        description = launch.find("param[@name='robot_description']")
+        self.assertIsNotNone(description)
+        self.assertIn(
+            "ground_manipulator_runtime)/scripts/render_ground_robot.py",
+            description.get("command"))
+        semantic = launch.find("param[@name='robot_description_semantic']")
+        self.assertIsNotNone(semantic)
+        self.assertIn("ground_robot.srdf", semantic.get("textfile"))
+        node = launch.find("node[@name='move_group']")
+        self.assertIsNotNone(node)
+        remaps = {
+            item.get("from"): item.get("to")
+            for item in node.findall("remap")}
+        self.assertEqual("/ground/joint_states", remaps.get("joint_states"))
+        launch_text = GROUND_MOVE_GROUP.read_text(encoding="utf-8").lower()
+        self.assertIn("ground_controllers.yaml", launch_text)
+        for token in ("fake", "brick", "benchmark", "provenance"):
+            self.assertNotIn(token, launch_text)
+
+        runtime_text = RUNTIME_LAUNCH.read_text(encoding="utf-8").lower()
+        self.assertNotIn("moveit", runtime_text)
+        execution_text = MOVEIT_EXECUTION_LAUNCH.read_text(
+            encoding="utf-8").lower()
+        self.assertIn("ground_robot_standalone.launch", execution_text)
+        self.assertIn("ground_move_group.launch", execution_text)
+        self.assertNotIn("brick", execution_text)
+        execution_launch = ET.parse(str(MOVEIT_EXECUTION_LAUNCH)).getroot()
+        rviz = execution_launch.find("node[@name='rviz']")
+        self.assertEqual(
+            "/ground/joint_states",
+            rviz.find("remap[@from='joint_states']").get("to"))
+        execute_test = ET.parse(str(MOVEIT_EXECUTE_TEST)).getroot()
+        test_node = execute_test.find("test[@test-name='moveit_execute']")
+        self.assertEqual(
+            "/ground/joint_states",
+            test_node.find("remap[@from='joint_states']").get("to"))
+
     def test_startup_accepts_late_model_and_drives_home_with_controllers(self):
         self.assertTrue(STARTUP.is_file(), "startup module is missing")
         self.assertTrue(SPAWN_SCRIPT.is_file(), "startup CLI is missing")

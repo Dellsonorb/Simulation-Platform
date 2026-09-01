@@ -7,6 +7,7 @@ import unittest
 import moveit_commander
 import rospy
 import rostest
+from std_msgs.msg import Bool
 
 
 class MoveItExecuteTest(unittest.TestCase):
@@ -15,13 +16,20 @@ class MoveItExecuteTest(unittest.TestCase):
         moveit_commander.roscpp_initialize(sys.argv)
 
     def test_rrtconnect_plan_and_real_execute(self):
+        ready = rospy.wait_for_message('/ground/runtime_ready', Bool,
+                                       timeout=60.0)
+        self.assertTrue(ready.data)
+
         group = moveit_commander.MoveGroupCommander('manipulator', wait_for_servers=60.0)
         group.set_planner_id('RRTConnectkConfigDefault')
         group.set_planning_time(10.0)
         group.set_start_state_to_current_state()
         before = group.get_current_joint_values()
+        active_joints = group.get_active_joints()
+        elbow_index = active_joints.index('elbow_joint')
         target = list(before)
-        target[2] = max(-2.5, min(2.5, target[2] - 0.2))
+        target[elbow_index] = max(
+            -2.5, min(2.5, target[elbow_index] - 0.2))
         group.set_joint_value_target(target)
         plan = group.plan()
         trajectory = plan[1] if isinstance(plan, tuple) else plan
@@ -29,8 +37,10 @@ class MoveItExecuteTest(unittest.TestCase):
         self.assertTrue(group.execute(trajectory, wait=True))
         group.stop()
         after = group.get_current_joint_values()
-        self.assertGreater(abs(after[2] - before[2]), 0.12)
-        self.assertAlmostEqual(target[2], after[2], delta=0.08)
+        self.assertGreater(
+            abs(after[elbow_index] - before[elbow_index]), 0.12)
+        self.assertAlmostEqual(
+            target[elbow_index], after[elbow_index], delta=0.08)
 
 
 if __name__ == '__main__':

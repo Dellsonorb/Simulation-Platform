@@ -1,9 +1,7 @@
 <launch>
-  <param name="robot_description"
-         command="$(find bunker_aubo_description)/scripts/sanitize_urdf_names.py '$(find bunker_aubo_description)/urdf/bunker_aubo.urdf.xacro'"/>
-  <include file="$(find bunker_aubo_moveit_config)/launch/planning_context.launch"/>
-  <rosparam command="load" file="$(find bunker_aubo_moveit_config)/config/ompl_planning.yaml"/>
-  <rosparam command="load" file="$(find bunker_aubo_moveit_config)/config/controllers.yaml"/>
+  <include file="$(find bunker_aubo_moveit_config)/launch/ground_move_group.launch">
+    <arg name="allow_trajectory_execution" value="false"/>
+  </include>
   <test test-name="moveit_config" pkg="bunker_aubo_moveit_config"
         type="test_moveit_config.py" time-limit="30"/>
 </launch>

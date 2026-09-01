@@ -1,5 +1,5 @@
 <launch>
-  <param name="robot_description_semantic" textfile="$(find bunker_aubo_moveit_config)/config/bunker_aubo.srdf"/>
+  <param name="robot_description_semantic" textfile="$(find bunker_aubo_moveit_config)/config/ground_robot.srdf"/>
   <rosparam command="load" file="$(find bunker_aubo_moveit_config)/config/kinematics.yaml" ns="robot_description_kinematics"/>
   <rosparam command="load" file="$(find bunker_aubo_moveit_config)/config/joint_limits.yaml" ns="robot_description_planning"/>
 </launch>

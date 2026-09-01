@@ -1,0 +1,42 @@
+<launch>
+  <arg name="allow_trajectory_execution" default="true"/>
+
+  <param name="robot_description"
+    command="$(find ground_manipulator_runtime)/scripts/render_ground_robot.py $(find ground_manipulator_runtime)/urdf/ground_robot.urdf.xacro"/>
+  <param name="robot_description_semantic"
+    textfile="$(find bunker_aubo_moveit_config)/config/ground_robot.srdf"/>
+  <rosparam command="load"
+    file="$(find bunker_aubo_moveit_config)/config/kinematics.yaml"
+    ns="robot_description_kinematics"/>
+  <rosparam command="load"
+    file="$(find bunker_aubo_moveit_config)/config/joint_limits.yaml"
+    ns="robot_description_planning"/>
+
+  <group ns="move_group">
+    <rosparam command="load"
+      file="$(find bunker_aubo_moveit_config)/config/ompl_planning.yaml"/>
+    <param name="planning_plugin" value="ompl_interface/OMPLPlanner"/>
+    <rosparam param="request_adapters">default_planner_request_adapters/AddTimeParameterization default_planner_request_adapters/FixWorkspaceBounds default_planner_request_adapters/FixStartStateBounds default_planner_request_adapters/FixStartStateCollision default_planner_request_adapters/FixStartStatePathConstraints</rosparam>
+    <param name="start_state_max_bounds_error" value="0.1"/>
+    <rosparam command="load"
+      file="$(find bunker_aubo_moveit_config)/config/ground_controllers.yaml"/>
+    <param name="moveit_controller_manager"
+      value="moveit_simple_controller_manager/MoveItSimpleControllerManager"/>
+    <param name="trajectory_execution/allowed_execution_duration_scaling"
+      value="1.5"/>
+    <param name="trajectory_execution/allowed_goal_duration_margin"
+      value="1.0"/>
+    <param name="trajectory_execution/allowed_start_tolerance" value="0.05"/>
+  </group>
+
+  <node name="move_group" pkg="moveit_ros_move_group" type="move_group"
+        output="screen">
+    <param name="allow_trajectory_execution"
+      value="$(arg allow_trajectory_execution)"/>
+    <param name="planning_scene_monitor/publish_planning_scene" value="true"/>
+    <param name="planning_scene_monitor/publish_geometry_updates" value="true"/>
+    <param name="planning_scene_monitor/publish_state_updates" value="true"/>
+    <param name="planning_scene_monitor/publish_transforms_updates" value="true"/>
+    <remap from="joint_states" to="/ground/joint_states"/>
+  </node>
+</launch>
