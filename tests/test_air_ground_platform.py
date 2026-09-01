@@ -152,6 +152,70 @@ class AirGroundPlatformTest(unittest.TestCase):
         self.assertTrue(checker.valid_p450_state(valid))
         self.assertFalse(checker.valid_p450_state(invalid))
 
+    def test_checker_requires_current_calibrated_camera_info(self):
+        checker = _load_checker()
+        stamp = SimpleNamespace(to_sec=lambda: 9.9)
+        message = SimpleNamespace(
+            header=SimpleNamespace(
+                stamp=stamp, frame_id="uav1/camera_link"),
+            width=640,
+            height=480,
+            K=[1.0] * 9,
+            P=[1.0] * 12,
+        )
+        summary = checker.camera_info_summary(
+            message, "uav1/camera_link", now=10.0)
+        self.assertEqual(640, summary["width"])
+        self.assertEqual(480, summary["height"])
+
+        message.K[3] = float("nan")
+        with self.assertRaises(checker.RuntimeCheckError):
+            checker.camera_info_summary(
+                message, "uav1/camera_link", now=10.0)
+
+        contracts = checker.p450_sensor_contracts(
+            "image", "camera_info", "imu")
+        self.assertEqual(
+            ["color", "color_info", "depth", "depth_info", "imu"],
+            [contract[0] for contract in contracts])
+        self.assertEqual(
+            "/uav1/camera/color/camera_info", contracts[1][1])
+        self.assertEqual(
+            "/uav1/camera/depth/camera_info", contracts[3][1])
+
+    def test_checker_requires_current_finite_world_tf_for_public_frames(self):
+        checker = _load_checker()
+
+        def transform(stamp=9.8, translation_x=0.1):
+            return SimpleNamespace(
+                header=SimpleNamespace(
+                    stamp=SimpleNamespace(to_sec=lambda: stamp),
+                    frame_id="world"),
+                child_frame_id="uav1/base_link",
+                transform=SimpleNamespace(
+                    translation=SimpleNamespace(
+                        x=translation_x, y=0.0, z=0.5),
+                    rotation=SimpleNamespace(
+                        x=0.0, y=0.0, z=0.0, w=1.0)))
+
+        summary = checker.transform_summary(
+            transform(), "world", "uav1/base_link", now=10.0)
+        self.assertAlmostEqual(0.2, summary["age_s"])
+        self.assertEqual("world<-uav1/base_link", summary["chain"])
+        with self.assertRaises(checker.RuntimeCheckError):
+            checker.transform_summary(
+                transform(stamp=7.0), "world", "uav1/base_link", now=10.0)
+        with self.assertRaises(checker.RuntimeCheckError):
+            checker.transform_summary(
+                transform(translation_x=float("inf")),
+                "world", "uav1/base_link", now=10.0)
+
+        self.assertIn("uav1/camera_imu_link", checker.AIR_TF_FRAMES)
+        self.assertIn("uav1/camera_color_optical_frame", checker.AIR_TF_FRAMES)
+        self.assertEqual(
+            ("ground/base_link", "ground/lidar_2d_link"),
+            checker.GROUND_TF_FRAMES)
+
     def test_smoke_is_bounded_and_uses_the_platform_environment(self):
         source = SMOKE.read_text(encoding="utf-8")
         self.assertIn("scripts/with_p450_env.bash", source)

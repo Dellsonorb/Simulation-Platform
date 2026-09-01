@@ -18,6 +18,22 @@ import check_bunker_runtime as bunker
 
 RuntimeCheckError = bunker.RuntimeCheckError
 
+AIR_TF_FRAMES = (
+    "uav1/base_link",
+    "uav1/camera_link",
+    "uav1/camera_depth_frame",
+    "uav1/camera_ired1_frame",
+    "uav1/camera_ired2_frame",
+    "uav1/camera_imu_link",
+    "uav1/d435i_link",
+    "uav1/camera_color_optical_frame",
+    "uav1/camera_depth_optical_frame",
+)
+GROUND_TF_FRAMES = (
+    "ground/base_link",
+    "ground/lidar_2d_link",
+)
+
 
 def sensor_header_summary(message, expected_frame, now):
     stamp = message.header.stamp.to_sec()
@@ -34,6 +50,52 @@ def sensor_header_summary(message, expected_frame, now):
             "sensor data is stale: stamp=%.6f, now=%.6f, age=%.3fs" %
             (stamp, now, age))
     return {"frame": frame, "stamp": stamp, "age_s": age}
+
+
+def camera_info_summary(message, expected_frame, now):
+    summary = sensor_header_summary(message, expected_frame, now)
+    calibration = tuple(message.K) + tuple(message.P)
+    if (message.width <= 0 or message.height <= 0 or
+            len(message.K) != 9 or len(message.P) != 12 or
+            not all(math.isfinite(float(value)) for value in calibration) or
+            message.K[0] <= 0.0 or message.K[4] <= 0.0 or
+            message.P[0] <= 0.0 or message.P[5] <= 0.0):
+        raise RuntimeCheckError("camera calibration is invalid")
+    summary.update({"width": message.width, "height": message.height})
+    return summary
+
+
+def transform_summary(transform, expected_target, expected_source, now):
+    target = transform.header.frame_id.lstrip("/")
+    source = transform.child_frame_id.lstrip("/")
+    stamp = transform.header.stamp.to_sec()
+    age = now - stamp
+    value = transform.transform
+    components = (
+        value.translation.x, value.translation.y, value.translation.z,
+        value.rotation.x, value.rotation.y, value.rotation.z, value.rotation.w,
+    )
+    quaternion_norm = math.sqrt(sum(
+        float(component) ** 2 for component in components[3:]))
+    if target != expected_target or source != expected_source:
+        raise RuntimeCheckError(
+            "TF is %s <- %s, expected %s <- %s" %
+            (transform.header.frame_id, transform.child_frame_id,
+             expected_target, expected_source))
+    if (not math.isfinite(stamp) or stamp <= 0.0 or
+            not all(math.isfinite(float(component)) for component in components)):
+        raise RuntimeCheckError("TF contains a zero or non-finite value")
+    if abs(quaternion_norm - 1.0) > 1e-3:
+        raise RuntimeCheckError("TF quaternion is not normalized")
+    if age < -0.2 or age > 2.0:
+        raise RuntimeCheckError(
+            "TF is stale: stamp=%.6f, now=%.6f, age=%.3fs" %
+            (stamp, now, age))
+    return {
+        "chain": "%s<-%s" % (target, source),
+        "stamp": stamp,
+        "age_s": age,
+    }
 
 
 def wait_for_condition(rospy, topic, message_type, predicate, timeout, label):
@@ -125,45 +187,81 @@ def check_p450_state(rospy, mavros_state_type, uav_state_type, timeout):
     }
 
 
-def check_p450_sensors(rospy, image_type, imu_type, timeout):
-    topics = (
+def p450_sensor_contracts(image_type, camera_info_type, imu_type):
+    return (
         ("color", "/uav1/camera/color/image_raw", image_type,
-         "uav1/camera_link"),
+         "uav1/camera_link", "image"),
+        ("color_info", "/uav1/camera/color/camera_info", camera_info_type,
+         "uav1/camera_link", "camera_info"),
         ("depth", "/uav1/camera/depth/image_raw", image_type,
-         "uav1/camera_depth_frame"),
-        ("imu", "/uav1/camera/imu", imu_type, "uav1/camera_imu_link"),
+         "uav1/camera_depth_frame", "image"),
+        ("depth_info", "/uav1/camera/depth/camera_info", camera_info_type,
+         "uav1/camera_depth_frame", "camera_info"),
+        ("imu", "/uav1/camera/imu", imu_type,
+         "uav1/camera_imu_link", "imu"),
     )
+
+
+def check_p450_sensors(
+        rospy, image_type, camera_info_type, imu_type, timeout):
     results = {}
-    for label, topic, message_type, frame in topics:
+    for label, topic, message_type, frame, kind in p450_sensor_contracts(
+            image_type, camera_info_type, imu_type):
         message, summary = wait_for_current_sensor(
             rospy, topic, message_type, frame, timeout)
-        if label != "imu":
+        if kind == "image":
             if message.width <= 0 or message.height <= 0 or not message.data:
                 raise RuntimeCheckError("%s image is empty" % label)
             summary.update({"width": message.width, "height": message.height})
+        elif kind == "camera_info":
+            summary = camera_info_summary(
+                message, frame, rospy.Time.now().to_sec())
         results[label] = summary
+    for image_label, info_label in (
+            ("color", "color_info"), ("depth", "depth_info")):
+        if (results[image_label]["width"], results[image_label]["height"]) != (
+                results[info_label]["width"], results[info_label]["height"]):
+            raise RuntimeCheckError(
+                "%s image and camera info dimensions differ" % image_label)
     return results
 
 
-def check_air_tf(rospy, tf2_ros, timeout):
+def check_current_tf_frames(rospy, tf2_ros, frames, timeout):
     buffer = tf2_ros.Buffer()
     listener = tf2_ros.TransformListener(buffer)
-    pairs = (
-        ("world", "uav1/base_link"),
-        ("uav1/base_link", "uav1/camera_link"),
-        ("uav1/camera_link", "uav1/camera_depth_frame"),
-    )
     observed = []
-    for target, source in pairs:
-        try:
-            buffer.lookup_transform(
-                target, source, rospy.Time(0), rospy.Duration(timeout))
-        except Exception as error:
+    for source in frames:
+        deadline = time.monotonic() + timeout
+        last_error = None
+        while time.monotonic() < deadline:
+            remaining = max(0.01, deadline - time.monotonic())
+            try:
+                transform = buffer.lookup_transform(
+                    "world", source, rospy.Time(0),
+                    rospy.Duration(min(0.5, remaining)))
+                observed.append(transform_summary(
+                    transform, "world", source, rospy.Time.now().to_sec()))
+                break
+            except Exception as error:
+                last_error = error
+                time.sleep(0.05)
+        else:
             raise RuntimeCheckError(
-                "missing TF %s <- %s: %s" % (target, source, error))
-        observed.append("%s<-%s" % (target, source))
+                "missing current TF world <- %s: %s" %
+                (source, last_error))
+    # Keep the listener alive until every lookup has completed.
     _ = listener
     return observed
+
+
+def check_air_tf(rospy, tf2_ros, timeout):
+    return check_current_tf_frames(
+        rospy, tf2_ros, AIR_TF_FRAMES, timeout)
+
+
+def check_ground_tf(rospy, tf2_ros, timeout):
+    return check_current_tf_frames(
+        rospy, tf2_ros, GROUND_TF_FRAMES, timeout)
 
 
 def run_checks(timeout):
@@ -175,7 +273,7 @@ def run_checks(timeout):
         from mavros_msgs.msg import State
         from nav_msgs.msg import Odometry
         from prometheus_msgs.msg import UAVState
-        from sensor_msgs.msg import Image, Imu, LaserScan
+        from sensor_msgs.msg import CameraInfo, Image, Imu, LaserScan
     except ImportError as error:
         raise RuntimeCheckError("ROS Python environment is incomplete: %s" % error)
 
@@ -191,12 +289,13 @@ def run_checks(timeout):
         "models": check_models(rospy, ModelStates, timeout),
         "p450": {
             "state": check_p450_state(rospy, State, UAVState, timeout),
-            "sensors": check_p450_sensors(rospy, Image, Imu, timeout),
+            "sensors": check_p450_sensors(
+                rospy, Image, CameraInfo, Imu, timeout),
             "tf": check_air_tf(rospy, tf2_ros, timeout),
         },
         "bunker": {
             "scan": bunker.check_scan(rospy, LaserScan, timeout),
-            "tf": bunker.check_tf(rospy, tf2_ros, timeout),
+            "tf": check_ground_tf(rospy, tf2_ros, timeout),
             "motion": bunker.check_motion(
                 rospy, Odometry, Twist, timeout),
         },
