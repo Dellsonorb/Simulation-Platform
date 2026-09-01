@@ -20,14 +20,17 @@ PERCEPTION = (
     PACKAGE / "src/air_ground_pick_demo/perception.py")
 FLIGHT = PACKAGE / "src/air_ground_pick_demo/flight.py"
 APPROACH = PACKAGE / "src/air_ground_pick_demo/approach.py"
+GRASP = PACKAGE / "src/air_ground_pick_demo/grasp.py"
 TARGET_MODEL = PACKAGE / "models/pick_target/model.sdf"
 TARGET_CONFIG = PACKAGE / "models/pick_target/model.config"
 OBSERVER = PACKAGE / "scripts/red_target_observer.py"
 AIR_CONFIG = PACKAGE / "config/air_observer.yaml"
 GROUND_CONFIG = PACKAGE / "config/ground_observer.yaml"
 OBSERVERS_LAUNCH = PACKAGE / "launch/target_observers.launch"
-ORCHESTRATOR = PACKAGE / "scripts/air_ground_pick_demo.py"
+ORCHESTRATOR = PACKAGE / "scripts/run_air_ground_pick_demo.py"
+TARGET_SPAWNER = PACKAGE / "scripts/spawn_pick_target.py"
 DEMO_CONFIG = PACKAGE / "config/demo.yaml"
+DEMO_LAUNCH = PACKAGE / "launch/air_ground_pick_demo.launch"
 
 
 def _load_perception():
@@ -51,6 +54,7 @@ def _load_module(path, module_name):
 
 class MinimalAirGroundPickDemoTest(unittest.TestCase):
     def test_package_is_a_small_sim_demo_layer(self):
+        self.assertTrue(ORCHESTRATOR.stat().st_mode & 0o111)
         root = ET.parse(str(PACKAGE_XML)).getroot()
         self.assertEqual("air_ground_pick_demo", root.findtext("name"))
         dependencies = {
@@ -220,6 +224,7 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
                 "validate_observation_stamps",
                 "PoseStamped", "rospy.is_shutdown()",
                 "def publish_pose",
+                "runtime_ready_topic", "wait_for_message", "Bool",
                 "color_frame, depth_frame, stamps =",
                 "color.header.frame_id", "color_info.header.frame_id",
                 "depth_info.header.frame_id", "to_sec()"):
@@ -277,6 +282,10 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
             rosparam = node.find("rosparam")
             self.assertIsNotNone(rosparam)
             self.assertIn("_observer.yaml", rosparam.get("file"))
+            parameters = {item.get("name"): item.get("value")
+                          for item in node.findall("param")}
+            self.assertEqual(
+                "/ground/runtime_ready", parameters["runtime_ready_topic"])
 
     def test_one_shot_flight_sequence_is_minimal_and_ordered(self):
         flight = _load_module(
@@ -422,6 +431,244 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
                 initial_xy=(3.5, 0.0), current_xy=(2.75, 0.0)))
         self.assertIsNone(approach.clearance_for_status(float("inf")))
         self.assertEqual(0.40, approach.clearance_for_status(0.40))
+
+    def test_ag95_feasibility_uses_real_opening_and_measured_joint(self):
+        grasp = _load_module(
+            GRASP, "air_ground_pick_grasp_feasibility_test_target")
+        feasibility = grasp.check_target_feasibility(
+            target_size=(0.240, 0.053, 0.115),
+            maximum_opening=0.0952, opening_margin=0.002)
+        self.assertTrue(feasibility.feasible)
+        self.assertAlmostEqual(0.053, feasibility.grasp_span)
+        self.assertAlmostEqual(0.055, feasibility.required_opening)
+        self.assertAlmostEqual(
+            0.0952,
+            grasp.conservative_jaw_opening(
+                master_joint_position=0.0,
+                maximum_opening=0.0952,
+                maximum_joint_position=0.93))
+        self.assertGreater(
+            grasp.conservative_jaw_opening(
+                master_joint_position=0.20,
+                maximum_opening=0.0952,
+                maximum_joint_position=0.93),
+            feasibility.required_opening)
+        self.assertFalse(grasp.check_target_feasibility(
+            target_size=(0.240, 0.100, 0.115),
+            maximum_opening=0.0952, opening_margin=0.002).feasible)
+        with self.assertRaises(grasp.GraspError):
+            grasp.conservative_jaw_opening(
+                master_joint_position=-0.01,
+                maximum_opening=0.0952,
+                maximum_joint_position=0.93)
+
+    def test_top_down_grasp_uses_tcp_geometry_and_vertical_cartesian_moves(self):
+        grasp = _load_module(
+            GRASP, "air_ground_pick_grasp_geometry_test_target")
+        poses = grasp.generate_top_down_grasp(
+            target=(2.0, 0.0, 0.0575, 0.0),
+            target_size=(0.240, 0.053, 0.115),
+            pregrasp_height=0.15, lift_height=0.15,
+            finger_pad_lower_edge_offset=0.0156,
+            contact_overlap=0.020, surface_clearance=0.010)
+        self.assertEqual((2.0, 0.0), poses.grasp.position[:2])
+        self.assertAlmostEqual(0.0794, poses.grasp.position[2])
+        self.assertAlmostEqual(0.2294, poses.pregrasp.position[2])
+        self.assertAlmostEqual(0.2294, poses.lift.position[2])
+        self.assertEqual(poses.grasp.orientation, poses.pregrasp.orientation)
+        self.assertEqual(poses.grasp.orientation, poses.lift.orientation)
+
+        rotation = grasp.quaternion_matrix(poses.grasp.orientation)
+        np.testing.assert_allclose(
+            rotation.dot(np.array((1.0, 0.0, 0.0))),
+            (0.0, 0.0, -1.0), atol=1e-9)
+        np.testing.assert_allclose(
+            rotation.dot(np.array((0.0, 1.0, 0.0))),
+            (0.0, 1.0, 0.0), atol=1e-9)
+
+        rotated = grasp.generate_top_down_grasp(
+            target=(2.0, 0.0, 0.0575, 0.4),
+            target_size=(0.240, 0.053, 0.115),
+            pregrasp_height=0.15, lift_height=0.15,
+            finger_pad_lower_edge_offset=0.0156,
+            contact_overlap=0.020, surface_clearance=0.010)
+        rotated_matrix = grasp.quaternion_matrix(rotated.grasp.orientation)
+        np.testing.assert_allclose(
+            rotated_matrix.dot(np.array((0.0, 1.0, 0.0))),
+            (-math.sin(0.4), math.cos(0.4), 0.0), atol=1e-9)
+
+        with self.assertRaises(grasp.GraspError):
+            grasp.generate_top_down_grasp(
+                target=(2.0, 0.0, 0.0575, 0.0),
+                target_size=(0.240, 0.053, 0.115),
+                pregrasp_height=0.15, lift_height=0.15,
+                finger_pad_lower_edge_offset=0.0156,
+                contact_overlap=0.090, surface_clearance=0.010)
+
+    def test_contact_classification_requires_target_on_both_real_pads(self):
+        grasp = _load_module(
+            GRASP, "air_ground_pick_grasp_contact_test_target")
+        target = "pick_target::pick_target_link::pick_target_collision"
+        left = "ground_robot::ground/left_finger_pad::collision"
+        right = "ground_robot::ground/right_finger_pad::collision"
+        ground = "ground_plane::link::collision"
+        self.assertEqual(
+            (True, True), grasp.contact_sides(
+                ((target, left), (right, target), (target, ground))))
+        self.assertEqual(
+            (True, False), grasp.contact_sides(((left, target),)))
+        self.assertEqual(
+            (False, False), grasp.contact_sides(
+                ((left, right), (target, ground))))
+
+    def test_cartesian_trajectory_ends_at_rest(self):
+        grasp = _load_module(
+            GRASP, "air_ground_pick_grasp_stop_test_target")
+        terminal = type("Point", (), {})()
+        terminal.velocities = [0.2, -0.1]
+        terminal.accelerations = [0.4, -0.3]
+        joint_trajectory = type("JointTrajectory", (), {})()
+        joint_trajectory.joint_names = ["joint_a", "joint_b"]
+        joint_trajectory.points = [terminal]
+        trajectory = type("Trajectory", (), {})()
+        trajectory.joint_trajectory = joint_trajectory
+
+        self.assertIs(trajectory, grasp.zero_terminal_motion(trajectory))
+        self.assertEqual([0.0, 0.0], terminal.velocities)
+        self.assertEqual([0.0, 0.0], terminal.accelerations)
+
+    def test_pick_runtime_config_names_real_arm_gripper_and_sensor_interfaces(self):
+        import yaml
+
+        config = yaml.safe_load(DEMO_CONFIG.read_text(encoding="utf-8"))
+        self.assertEqual(
+            "/ground/arm_controller/follow_joint_trajectory",
+            config["arm_action"])
+        self.assertEqual(
+            "/ground/gripper_controller/follow_joint_trajectory",
+            config["gripper_action"])
+        self.assertEqual("/ground/joint_states", config["joint_state_topic"])
+        self.assertEqual(
+            "/ground_observer/target_pose", config["ground_pose_topic"])
+        self.assertEqual("/pick_target/contacts", config["contact_topic"])
+        self.assertEqual(
+            ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+             "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"],
+            config["observation_joint_names"])
+        self.assertEqual(6, len(config["observation_joint_positions"]))
+        self.assertEqual([0.240, 0.053, 0.115], config["target_size"])
+        self.assertEqual(0.0952, config["maximum_gripper_opening"])
+        self.assertEqual(0.0, config["gripper_open_position"])
+        self.assertGreater(config["gripper_closed_position"], 0.0)
+        self.assertGreaterEqual(config["minimum_gripper_closed_joint"], 0.20)
+        self.assertGreaterEqual(config["minimum_lift"], 0.10)
+        self.assertAlmostEqual(0.005, config["planning_position_tolerance"])
+        self.assertAlmostEqual(
+            0.02, config["planning_orientation_tolerance"])
+        self.assertAlmostEqual(0.02, config["pose_position_tolerance"])
+        self.assertAlmostEqual(0.12, config["pose_orientation_tolerance"])
+        self.assertGreater(config["pose_settle_timeout"], 0.0)
+        self.assertLessEqual(config["pose_settle_timeout"], 5.0)
+
+    def test_demo_launch_composes_platform_moveit_target_and_sensor_nodes(self):
+        root = ET.parse(str(DEMO_LAUNCH)).getroot()
+        arguments = {item.get("name"): item.get("default")
+                     for item in root.findall("arg")}
+        self.assertEqual("true", arguments["run_demo"])
+        self.assertEqual("true", arguments["start_moveit"])
+        self.assertIn("px4_workdir", arguments)
+        includes = [item.get("file") for item in root.findall("include")]
+        self.assertTrue(any("air_ground_standalone.launch" in item
+                            for item in includes))
+        shared = next(item for item in root.findall("include")
+                      if "air_ground_standalone.launch" in item.get("file"))
+        shared_args = {item.get("name"): item.get("value")
+                       for item in shared.findall("arg")}
+        self.assertEqual("$(arg px4_workdir)", shared_args["px4_workdir"])
+        moveit = next(item for item in root.findall("include")
+                      if "ground_move_group.launch" in item.get("file"))
+        self.assertEqual("$(arg start_moveit)", moveit.get("if"))
+        self.assertTrue(any("target_observers.launch" in item
+                            for item in includes))
+        nodes = root.findall("node")
+        spawn = next(node for node in nodes
+                     if node.get("name") == "spawn_pick_target")
+        self.assertEqual("air_ground_pick_demo", spawn.get("pkg"))
+        self.assertEqual("spawn_pick_target.py", spawn.get("type"))
+        parameters = {item.get("name"): item.get("value")
+                      for item in spawn.findall("param")}
+        self.assertIn("pick_target/model.sdf", parameters["model_path"])
+        self.assertEqual(
+            "/uav1/camera/color/image_raw", parameters["air_image_topic"])
+        self.assertEqual(
+            "/ground/d435/color/image_raw",
+            parameters["ground_image_topic"])
+        orchestrator = next(node for node in nodes
+                            if node.get("name") == "air_ground_pick_demo")
+        self.assertEqual("air_ground_pick_demo", orchestrator.get("pkg"))
+        self.assertEqual(
+            "run_air_ground_pick_demo.py", orchestrator.get("type"))
+        self.assertFalse(
+            (PACKAGE / "scripts/air_ground_pick_demo.py").exists())
+        self.assertEqual("$(arg run_demo)", orchestrator.get("if"))
+        self.assertIn("demo.yaml", orchestrator.find("rosparam").get("file"))
+        launch_text = DEMO_LAUNCH.read_text(encoding="utf-8").lower()
+        self.assertNotIn("brick_pick", launch_text)
+        self.assertNotIn("attachment", launch_text)
+
+    def test_target_spawn_waits_for_robot_sensors_before_inserting_model(self):
+        source = TARGET_SPAWNER.read_text(encoding="utf-8")
+        for required in (
+                "runtime_ready_topic", "wait_for_message", "Bool",
+                "SpawnModel", "wait_for_service", "model_xml",
+                "initial_pose", "air_image_topic", "ground_image_topic",
+                "Image"):
+            self.assertIn(required, source)
+        lowered = source.lower()
+        for forbidden in (
+                "/gazebo/model_states", "get_model_state", "set_model_state",
+                "teleport", "attach"):
+            self.assertNotIn(forbidden, lowered)
+        cmake = CMAKE.read_text(encoding="utf-8")
+        self.assertIn("scripts/spawn_pick_target.py", cmake)
+
+    def test_orchestrator_pick_phase_is_sensor_and_controller_driven(self):
+        source = ORCHESTRATOR.read_text(encoding="utf-8")
+        for required in (
+                "MoveGroupCommander", "FollowJointTrajectoryAction",
+                "FollowJointTrajectoryGoal", "JointTrajectoryPoint",
+                "ContactsState", "RobotState", "contact_sides",
+                "generate_top_down_grasp",
+                "GROUND_OBSERVE", "GROUND_REFINED", "PREGRASP", "GRASP",
+                "LIFT", "compute_cartesian_path", "set_pose_target",
+                "bilateral"):
+            self.assertIn(required, source)
+        self.assertIn("zero_terminal_motion", source)
+        self.assertIn("max_joint_speed", source)
+        self.assertIn("measured=%.4f expected=%.4f", source)
+        verify = source[source.index("    def _verify_tcp_pose("):
+                        source.index("    def _execute_pregrasp(")]
+        self.assertIn("lookup_transform", verify)
+        self.assertIn("self._end_effector_link", verify)
+        self.assertIn("self._pose_settle_timeout", verify)
+        self.assertIn("self._wait_step()", verify)
+        self.assertNotIn("get_current_pose", verify)
+        initialize_moveit = source[
+            source.index("    def _initialize_moveit("):
+            source.index("    @staticmethod\n    def _quaternion_error")]
+        self.assertIn(
+            "self._planning_position_tolerance", initialize_moveit)
+        self.assertIn(
+            "self._planning_orientation_tolerance", initialize_moveit)
+        cartesian = source[source.index("    def _execute_cartesian("):
+                           source.index("    def _bilateral_contact_current(")]
+        self.assertIn("_robot_state_from_joint_feedback()", cartesian)
+        self.assertNotIn("get_current_state", cartesian)
+        lowered = source.lower()
+        for forbidden in (
+                "/gazebo/model", "getmodelstate", "setmodelstate",
+                "teleport", "attach", "brick_pick"):
+            self.assertNotIn(forbidden, lowered)
 
     def test_orchestrator_uses_runtime_interfaces_without_gt_or_teleport(self):
         import yaml

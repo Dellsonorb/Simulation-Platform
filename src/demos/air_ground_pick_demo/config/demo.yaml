@@ -8,6 +8,11 @@ air_pose_topic: /air_observer/target_pose
 
 ground_scan_topic: /ground/scan
 ground_cmd_topic: /ground/cmd_vel
+ground_pose_topic: /ground_observer/target_pose
+joint_state_topic: /ground/joint_states
+contact_topic: /pick_target/contacts
+arm_action: /ground/arm_controller/follow_joint_trajectory
+gripper_action: /ground/gripper_controller/follow_joint_trajectory
 world_frame: world
 ground_base_frame: ground/base_link
 
@@ -43,3 +48,56 @@ blocked_timeout: 4.0
 max_ground_travel: 1.10
 command_period: 0.50
 stop_publish_count: 5
+
+observation_joint_names:
+  - shoulder_pan_joint
+  - shoulder_lift_joint
+  - elbow_joint
+  - wrist_1_joint
+  - wrist_2_joint
+  - wrist_3_joint
+observation_joint_positions: [0.2040, -0.9584, 1.7778, 1.1465, 1.5710, 0.2038]
+observation_joint_duration: 5.0
+observation_joint_tolerance: 0.08
+arm_action_timeout: 25.0
+ground_observation_timeout: 20.0
+ground_observation_max_age: 1.0
+
+move_group: manipulator
+end_effector_link: ground/gripper_tcp_link
+planner_id: RRTConnectkConfigDefault
+moveit_server_timeout: 30.0
+planning_time: 10.0
+planning_attempts: 5
+velocity_scaling: 0.20
+acceleration_scaling: 0.20
+planning_position_tolerance: 0.005
+planning_orientation_tolerance: 0.02
+pose_position_tolerance: 0.02
+pose_orientation_tolerance: 0.12
+pose_settle_timeout: 3.0
+cartesian_eef_step: 0.005
+cartesian_min_fraction: 0.95
+cartesian_velocity_scaling: 0.10
+
+target_size: [0.240, 0.053, 0.115]
+target_center_height_tolerance: 0.030
+maximum_gripper_opening: 0.0952
+maximum_gripper_joint: 0.93
+opening_margin: 0.002
+gripper_open_position: 0.0
+gripper_closed_position: 0.70
+minimum_gripper_closed_joint: 0.20
+gripper_motion_time: 2.0
+gripper_action_timeout: 8.0
+gripper_joint_tolerance: 0.10
+
+pregrasp_height: 0.15
+lift_height: 0.15
+minimum_lift: 0.10
+finger_pad_lower_edge_offset: 0.0156
+contact_overlap: 0.020
+surface_clearance: 0.010
+contact_max_age: 0.30
+contact_timeout: 5.0
+retention_hold: 1.0

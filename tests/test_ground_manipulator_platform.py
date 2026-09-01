@@ -448,6 +448,27 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
         self.assertEqual(
             startup.HOME_JOINT_POSITIONS[:-1], stages[-1][1])
 
+        complete_feedback = SimpleNamespace(
+            name=[name for name, _value in startup.HOME_JOINT_POSITIONS],
+            position=[value for _name, value in startup.HOME_JOINT_POSITIONS])
+        self.assertTrue(startup.joint_feedback_is_complete(
+            complete_feedback, startup.HOME_JOINT_POSITIONS))
+        incomplete_feedback = SimpleNamespace(
+            name=complete_feedback.name[:-1],
+            position=complete_feedback.position[:-1])
+        self.assertFalse(startup.joint_feedback_is_complete(
+            incomplete_feedback, startup.HOME_JOINT_POSITIONS))
+        non_finite_feedback = SimpleNamespace(
+            name=complete_feedback.name,
+            position=complete_feedback.position[:-1] + [float("nan")])
+        self.assertFalse(startup.joint_feedback_is_complete(
+            non_finite_feedback, startup.HOME_JOINT_POSITIONS))
+
+        spawn_source = SPAWN_SCRIPT.read_text(encoding="utf-8")
+        self.assertLess(
+            spawn_source.index("wait_for_controller_feedback"),
+            spawn_source.index("arm.send_goal"))
+
         with self.assertRaises(startup.StartupError):
             startup.initialize_ground_robot(
                 Gateway(), "<robot/>", object(),
@@ -493,6 +514,7 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
             "joint_state_controller",
             "position_controllers",
             "robot_state_publisher",
+            "sensor_msgs",
             "std_msgs",
             "tf",
             "tf2_ros",
@@ -818,6 +840,10 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
             "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
             "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
         ], controllers["arm_controller"]["joints"])
+        self.assertAlmostEqual(
+            0.10,
+            controllers["arm_controller"]["constraints"]
+            ["stopped_velocity_tolerance"])
         self.assertEqual(
             ["left_outer_knuckle_joint"],
             controllers["gripper_controller"]["joints"])

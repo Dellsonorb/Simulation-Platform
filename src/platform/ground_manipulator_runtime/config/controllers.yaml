@@ -13,7 +13,7 @@ arm_controller:
     - wrist_3_joint
   constraints:
     goal_time: 2.0
-    stopped_velocity_tolerance: 0.05
+    stopped_velocity_tolerance: 0.10
     shoulder_pan_joint: {goal: 0.05}
     shoulder_lift_joint: {goal: 0.05}
     elbow_joint: {goal: 0.05}

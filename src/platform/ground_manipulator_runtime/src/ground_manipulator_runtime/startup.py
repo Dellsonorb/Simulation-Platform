@@ -1,3 +1,6 @@
+import math
+
+
 MODEL_NAME = "ground_robot"
 HOME_JOINT_POSITIONS = (
     ("shoulder_pan_joint", 0.0),
@@ -12,6 +15,15 @@ HOME_JOINT_POSITIONS = (
 
 class StartupError(RuntimeError):
     pass
+
+
+def joint_feedback_is_complete(message, expected_positions):
+    if len(message.name) != len(message.position):
+        return False
+    positions = dict(zip(message.name, message.position))
+    expected_names = {name for name, _value in expected_positions}
+    return expected_names.issubset(positions) and all(
+        math.isfinite(positions[name]) for name in expected_names)
 
 
 def arm_home_trajectory(positions):

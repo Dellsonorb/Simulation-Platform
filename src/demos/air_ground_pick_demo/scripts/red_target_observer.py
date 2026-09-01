@@ -12,7 +12,7 @@ import message_filters
 import numpy as np
 import rospy
 from sensor_msgs.msg import CameraInfo, Image
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from tf.transformations import quaternion_from_euler, quaternion_matrix
 import tf2_ros
 
@@ -24,6 +24,19 @@ from air_ground_pick_demo.perception import (
 
 class RedTargetObserver:
     def __init__(self):
+        runtime_ready_topic = rospy.get_param(
+            "~runtime_ready_topic", "/ground/runtime_ready")
+        runtime_ready_timeout = float(rospy.get_param(
+            "~runtime_ready_timeout", 90.0))
+        if not math.isfinite(runtime_ready_timeout) or runtime_ready_timeout <= 0:
+            raise ValueError("runtime_ready_timeout must be positive")
+        ready = rospy.wait_for_message(
+            runtime_ready_topic, Bool, timeout=runtime_ready_timeout)
+        if not ready.data:
+            raise RuntimeError(
+                "ground runtime did not become ready on %s" %
+                runtime_ready_topic)
+
         self.color_topic = rospy.get_param("~color_topic")
         self.depth_topic = rospy.get_param("~depth_topic")
         self.color_info_topic = rospy.get_param("~color_info_topic")

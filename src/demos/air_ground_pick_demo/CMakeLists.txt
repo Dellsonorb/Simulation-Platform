@@ -7,8 +7,9 @@ catkin_python_setup()
 catkin_package()
 
 catkin_install_python(PROGRAMS
-  scripts/air_ground_pick_demo.py
+  scripts/run_air_ground_pick_demo.py
   scripts/red_target_observer.py
+  scripts/spawn_pick_target.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

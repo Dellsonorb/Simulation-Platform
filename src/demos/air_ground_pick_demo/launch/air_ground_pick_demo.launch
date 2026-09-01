@@ -1,0 +1,50 @@
+<launch>
+  <arg name="gui" default="false"/>
+  <arg name="enable_mid360" default="false"/>
+  <arg name="run_demo" default="true"/>
+  <arg name="start_moveit" default="true"/>
+  <arg name="px4_workdir" default="sitl_air_ground_pick_v1"/>
+  <arg name="target_x" default="2.0"/>
+  <arg name="target_y" default="0.0"/>
+  <arg name="target_z" default="0.0575"/>
+  <arg name="target_yaw" default="0.0"/>
+
+  <include
+    file="$(find sim_platform_bringup)/launch/air_ground_standalone.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="enable_mid360" value="$(arg enable_mid360)"/>
+    <arg name="px4_workdir" value="$(arg px4_workdir)"/>
+    <arg name="bunker_x" value="3.0"/>
+    <arg name="bunker_y" value="0.0"/>
+    <arg name="bunker_z" value="0.36"/>
+    <arg name="bunker_yaw" value="0.0"/>
+  </include>
+
+  <include
+    if="$(arg start_moveit)"
+    file="$(find bunker_aubo_moveit_config)/launch/ground_move_group.launch"/>
+  <include
+    file="$(find air_ground_pick_demo)/launch/target_observers.launch"/>
+
+  <node name="spawn_pick_target" pkg="air_ground_pick_demo"
+        type="spawn_pick_target.py" output="screen">
+    <param name="runtime_ready_topic" value="/ground/runtime_ready"/>
+    <param name="air_image_topic" value="/uav1/camera/color/image_raw"/>
+    <param name="ground_image_topic"
+           value="/ground/d435/color/image_raw"/>
+    <param name="model_path"
+           value="$(find air_ground_pick_demo)/models/pick_target/model.sdf"/>
+    <param name="model_name" value="pick_target"/>
+    <param name="reference_frame" value="world"/>
+    <param name="x" value="$(arg target_x)"/>
+    <param name="y" value="$(arg target_y)"/>
+    <param name="z" value="$(arg target_z)"/>
+    <param name="yaw" value="$(arg target_yaw)"/>
+  </node>
+
+  <node if="$(arg run_demo)" name="air_ground_pick_demo" pkg="air_ground_pick_demo"
+        type="run_air_ground_pick_demo.py" output="screen" required="true">
+    <rosparam command="load"
+      file="$(find air_ground_pick_demo)/config/demo.yaml"/>
+  </node>
+</launch>

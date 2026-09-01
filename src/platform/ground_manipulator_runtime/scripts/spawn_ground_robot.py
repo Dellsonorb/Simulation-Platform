@@ -15,6 +15,7 @@ from control_msgs.msg import (
 from gazebo_msgs.msg import ModelStates
 from gazebo_ros import gazebo_interface
 from geometry_msgs.msg import Pose, Quaternion
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
 from tf.transformations import quaternion_from_euler
 from trajectory_msgs.msg import JointTrajectoryPoint
@@ -23,6 +24,7 @@ from ground_manipulator_runtime.startup import (
     StartupError,
     arm_home_trajectory,
     initialize_ground_robot,
+    joint_feedback_is_complete,
 )
 
 
@@ -105,6 +107,21 @@ def feedback_logger(name):
     return log_feedback
 
 
+def wait_for_controller_feedback(positions, deadline):
+    while not rospy.is_shutdown():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            return False
+        try:
+            message = rospy.wait_for_message(
+                "joint_states", JointState, timeout=min(1.0, remaining))
+        except rospy.ROSException:
+            continue
+        if joint_feedback_is_complete(message, positions):
+            return True
+    return False
+
+
 def drive_home(positions, timeout):
     arm_positions = positions[:-1]
     gripper_positions = positions[-1:]
@@ -123,6 +140,10 @@ def drive_home(positions, timeout):
             rospy.logerr(
                 "Ground %s trajectory action server was not ready", name)
             return False
+    if not wait_for_controller_feedback(positions, deadline):
+        rospy.logerr(
+            "Ground controller joint feedback was not ready before home")
+        return False
     arm.send_goal(
         trajectory_goal(arm_home_trajectory(arm_positions)),
         feedback_cb=feedback_logger("arm"))
