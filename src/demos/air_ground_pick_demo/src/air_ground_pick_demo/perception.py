@@ -10,6 +10,25 @@ class PerceptionError(RuntimeError):
     pass
 
 
+def validate_observation_stamps(
+        stamps, now, max_age=0.5, max_future_skew=0.1):
+    """Reject RGB-D samples that are stale or ahead of the active clock."""
+    values = np.asarray(tuple(stamps), dtype=np.float64)
+    current = float(now)
+    age_limit = float(max_age)
+    future_limit = float(max_future_skew)
+    if (values.shape != (4,) or not np.isfinite(values).all() or
+            np.any(values <= 0.0) or not math.isfinite(current) or
+            current <= 0.0 or not math.isfinite(age_limit) or
+            age_limit <= 0.0 or not math.isfinite(future_limit) or
+            future_limit < 0.0):
+        raise PerceptionError("observation timestamps are invalid")
+    if current - float(np.min(values)) > age_limit:
+        raise PerceptionError("RGB-D observation is stale")
+    if float(np.max(values)) - current > future_limit:
+        raise PerceptionError("RGB-D observation is ahead of the clock")
+
+
 def _camera_matrix(value):
     matrix = np.asarray(value, dtype=np.float64)
     if matrix.shape == (9,):
@@ -36,7 +55,7 @@ def select_red_component(
     hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
     red = cv2.inRange(
         hsv, np.array((0, min_saturation, min_value), dtype=np.uint8),
-        np.array((12, 255, 255), dtype=np.uint8))
+        np.array((6, 255, 255), dtype=np.uint8))
     red |= cv2.inRange(
         hsv, np.array((165, min_saturation, min_value), dtype=np.uint8),
         np.array((179, 255, 255), dtype=np.uint8))
@@ -83,6 +102,73 @@ def backproject_mask(
     y = ((rows.astype(np.float64) - calibration[1, 2]) * z /
          calibration[1, 1])
     return np.column_stack((x, y, z))
+
+
+def register_depth_to_color(
+        depth_m, depth_k, color_k, output_shape,
+        rotation=None, translation=None):
+    """Project a depth image into the color optical frame with a z-buffer."""
+    depth = np.asarray(depth_m, dtype=np.float32)
+    if depth.ndim != 2:
+        raise PerceptionError("depth image must be two-dimensional")
+    try:
+        output_rows, output_columns = (
+            int(value) for value in tuple(output_shape))
+    except (TypeError, ValueError):
+        raise PerceptionError("registered image dimensions are invalid")
+    if output_rows <= 0 or output_columns <= 0:
+        raise PerceptionError("registered image dimensions are invalid")
+    depth_calibration = _camera_matrix(depth_k)
+    color_calibration = _camera_matrix(color_k)
+    transform_rotation = (
+        np.eye(3, dtype=np.float64) if rotation is None else
+        np.asarray(rotation, dtype=np.float64))
+    transform_translation = (
+        np.zeros(3, dtype=np.float64) if translation is None else
+        np.asarray(translation, dtype=np.float64))
+    if (transform_rotation.shape != (3, 3) or
+            transform_translation.shape != (3,) or
+            not np.isfinite(transform_rotation).all() or
+            not np.isfinite(transform_translation).all()):
+        raise PerceptionError("depth-to-color transform is invalid")
+
+    rows, columns = depth.shape
+    image_rows, image_columns = np.indices((rows, columns), dtype=np.float64)
+    valid = np.isfinite(depth)
+    valid[valid] = depth[valid] > 0.0
+    z = depth[valid].astype(np.float64)
+    registered = np.full(
+        output_rows * output_columns, np.inf, dtype=np.float64)
+    if not z.size:
+        registered[:] = np.nan
+        return registered.reshape(output_rows, output_columns).astype(
+            np.float32)
+    x = ((image_columns[valid] - depth_calibration[0, 2]) * z /
+         depth_calibration[0, 0])
+    y = ((image_rows[valid] - depth_calibration[1, 2]) * z /
+         depth_calibration[1, 1])
+    color_points = np.column_stack((x, y, z)).dot(
+        transform_rotation.T) + transform_translation
+    color_z = color_points[:, 2]
+    projectable = np.isfinite(color_points).all(axis=1) & (color_z > 0.0)
+    color_points = color_points[projectable]
+    color_z = color_z[projectable]
+    projected_columns = np.rint(
+        color_calibration[0, 0] * color_points[:, 0] / color_z +
+        color_calibration[0, 2]).astype(np.int64)
+    projected_rows = np.rint(
+        color_calibration[1, 1] * color_points[:, 1] / color_z +
+        color_calibration[1, 2]).astype(np.int64)
+    inside = (
+        (projected_columns >= 0) &
+        (projected_columns < output_columns) &
+        (projected_rows >= 0) &
+        (projected_rows < output_rows))
+    flat_indices = (
+        projected_rows[inside] * output_columns + projected_columns[inside])
+    np.minimum.at(registered, flat_indices, color_z[inside])
+    registered[~np.isfinite(registered)] = np.nan
+    return registered.reshape(output_rows, output_columns).astype(np.float32)
 
 
 def canonical_yaw(value):

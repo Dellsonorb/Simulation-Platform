@@ -1,0 +1,12 @@
+<launch>
+  <node name="air_target_observer" pkg="air_ground_pick_demo"
+        type="red_target_observer.py" output="screen" required="true">
+    <rosparam command="load"
+      file="$(find air_ground_pick_demo)/config/air_observer.yaml"/>
+  </node>
+  <node name="ground_target_observer" pkg="air_ground_pick_demo"
+        type="red_target_observer.py" output="screen" required="true">
+    <rosparam command="load"
+      file="$(find air_ground_pick_demo)/config/ground_observer.yaml"/>
+  </node>
+</launch>

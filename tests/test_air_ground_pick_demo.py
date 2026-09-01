@@ -4,6 +4,7 @@ import importlib.util
 import math
 from pathlib import Path
 import unittest
+import warnings
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -17,6 +18,10 @@ PERCEPTION = (
     PACKAGE / "src/air_ground_pick_demo/perception.py")
 TARGET_MODEL = PACKAGE / "models/pick_target/model.sdf"
 TARGET_CONFIG = PACKAGE / "models/pick_target/model.config"
+OBSERVER = PACKAGE / "scripts/red_target_observer.py"
+AIR_CONFIG = PACKAGE / "config/air_observer.yaml"
+GROUND_CONFIG = PACKAGE / "config/ground_observer.yaml"
+OBSERVERS_LAUNCH = PACKAGE / "launch/target_observers.launch"
 
 
 def _load_perception():
@@ -68,6 +73,12 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         surface = collision.find("surface")
         self.assertGreaterEqual(float(surface.findtext("friction/ode/mu")), 1.0)
         self.assertGreaterEqual(float(surface.findtext("friction/ode/mu2")), 1.0)
+        material = link.find("visual/material")
+        self.assertEqual(
+            "Gazebo/Red", material.findtext("script/name"))
+        self.assertEqual(
+            "file://media/materials/scripts/gazebo.material",
+            material.findtext("script/uri"))
         sensor = link.find("sensor[@type='contact']")
         self.assertIsNotNone(sensor)
         self.assertEqual(
@@ -92,6 +103,13 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         with self.assertRaises(perception.PerceptionError):
             perception.select_red_component(
                 image, min_pixels=500, ambiguity_ratio=0.30)
+
+    def test_red_component_selection_rejects_aubo_orange(self):
+        perception = _load_perception()
+        image = np.zeros((60, 80, 3), dtype=np.uint8)
+        image[10:50, 20:60] = (200, 70, 0)
+        with self.assertRaises(perception.PerceptionError):
+            perception.select_red_component(image, min_pixels=100)
 
     def test_backprojection_uses_calibration_and_rejects_invalid_depth(self):
         perception = _load_perception()
@@ -146,6 +164,104 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
             perception.fuse_pose_samples(
                 inconsistent, max_position_spread=0.04,
                 max_yaw_spread=0.08)
+
+    def test_depth_registration_uses_real_optical_extrinsics(self):
+        perception = _load_perception()
+        depth = np.full((3, 3), np.nan, dtype=np.float32)
+        depth[1, 1] = 2.0
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            registered = perception.register_depth_to_color(
+                depth, np.eye(3), np.eye(3), (3, 3),
+                rotation=np.eye(3), translation=np.array((1.0, 0.0, 0.0)))
+        self.assertTrue(math.isnan(float(registered[1, 1])))
+        self.assertAlmostEqual(2.0, float(registered[1, 2]))
+        with self.assertRaises(perception.PerceptionError):
+            perception.register_depth_to_color(
+                depth, np.eye(3), np.eye(3), (3, 3),
+                rotation=np.zeros((2, 2)), translation=np.zeros(3))
+
+    def test_observation_timestamps_must_be_current_sim_time(self):
+        perception = _load_perception()
+        perception.validate_observation_stamps(
+            (9.96, 9.98, 9.96, 9.98), now=10.0,
+            max_age=0.5, max_future_skew=0.1)
+        with self.assertRaises(perception.PerceptionError):
+            perception.validate_observation_stamps(
+                (8.0, 8.0, 8.0, 8.0), now=10.0,
+                max_age=0.5, max_future_skew=0.1)
+        with self.assertRaises(perception.PerceptionError):
+            perception.validate_observation_stamps(
+                (10.2, 10.2, 10.2, 10.2), now=10.0,
+                max_age=0.5, max_future_skew=0.1)
+
+    def test_observers_are_camera_configured_and_have_no_gt_input(self):
+        source = OBSERVER.read_text(encoding="utf-8")
+        for required in (
+                "message_filters.ApproximateTimeSynchronizer",
+                "select_red_component", "register_depth_to_color",
+                "backproject_mask", "estimate_target_pose",
+                "fuse_pose_samples", "lookup_transform",
+                "validate_observation_stamps",
+                "PoseStamped", "rospy.is_shutdown()",
+                "def publish_pose",
+                "color_frame, depth_frame, stamps =",
+                "color.header.frame_id", "color_info.header.frame_id",
+                "depth_info.header.frame_id", "to_sec()"):
+            self.assertIn(required, source)
+        for parameter in (
+                "~color_topic", "~depth_topic", "~color_info_topic",
+                "~depth_info_topic", "~output_topic", "~target_frame",
+                "~camera_optical_frame"):
+            self.assertIn(parameter, source)
+        lowered = source.lower()
+        for forbidden in (
+                "/gazebo/model", "getmodelstate", "setmodelstate",
+                "teleport", "attach", "benchmark", "provenance"):
+            self.assertNotIn(forbidden, lowered)
+        self.assertGreaterEqual(source.count("validate_observation_stamps("), 2)
+
+    def test_air_and_ground_observer_configs_use_public_d435_topics(self):
+        import yaml
+
+        air = yaml.safe_load(AIR_CONFIG.read_text(encoding="utf-8"))
+        ground = yaml.safe_load(GROUND_CONFIG.read_text(encoding="utf-8"))
+        self.assertEqual(
+            "/uav1/camera/color/image_raw", air["color_topic"])
+        self.assertEqual(
+            "/uav1/camera/depth/image_raw", air["depth_topic"])
+        self.assertEqual(
+            "uav1/camera_link",
+            air["camera_optical_frame"])
+        self.assertEqual("/air_observer/target_pose", air["output_topic"])
+        self.assertEqual(
+            "/ground/d435/color/image_raw", ground["color_topic"])
+        self.assertEqual(
+            "/ground/d435/depth/image_raw", ground["depth_topic"])
+        self.assertEqual(
+            "ground/d435_color_optical_frame",
+            ground["camera_optical_frame"])
+        self.assertEqual(
+            "/ground_observer/target_pose", ground["output_topic"])
+        for config in (air, ground):
+            self.assertEqual("world", config["target_frame"])
+            self.assertEqual(0.115, config["target_height"])
+            self.assertGreaterEqual(config["stable_frames"], 3)
+            self.assertEqual(1.0, config["max_observation_age"])
+            self.assertGreaterEqual(config["max_future_skew"], 0.0)
+
+    def test_observer_launch_starts_two_independent_sensor_nodes(self):
+        root = ET.parse(str(OBSERVERS_LAUNCH)).getroot()
+        nodes = root.findall("node")
+        self.assertEqual(
+            {"air_target_observer", "ground_target_observer"},
+            {node.get("name") for node in nodes})
+        for node in nodes:
+            self.assertEqual("air_ground_pick_demo", node.get("pkg"))
+            self.assertEqual("red_target_observer.py", node.get("type"))
+            rosparam = node.find("rosparam")
+            self.assertIsNotNone(rosparam)
+            self.assertIn("_observer.yaml", rosparam.get("file"))
 
 
 if __name__ == "__main__":
