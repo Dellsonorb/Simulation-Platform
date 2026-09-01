@@ -1,0 +1,16 @@
+<launch>
+  <arg name="gui" default="false"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name"
+      value="$(find bunker_sim_runtime)/worlds/bunker_standalone.world"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="paused" value="false"/>
+    <arg name="debug" value="false"/>
+    <arg name="verbose" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="server_required" value="true"/>
+  </include>
+
+  <include file="$(find bunker_sim_runtime)/launch/bunker_runtime.launch"/>
+</launch>

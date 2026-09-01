@@ -44,6 +44,8 @@ DYNAMIC_LIFECYCLE_TOKENS = (
 JOINT_CANDIDATE_SPAWNS = frozenset({
     ("src/platform/sim_platform_bringup/launch/p450_runtime.launch",
      "p450_D435i_1_spawn"),
+    ("src/platform/bunker_sim_runtime/launch/bunker_runtime.launch",
+     "spawn_bunker"),
     ("src/ground/bunker_aubo_gazebo/launch/combined_robot.launch",
      "spawn_bunker_aubo"),
     ("src/ground/bunker_aubo_gazebo/launch/combined_robot.launch",

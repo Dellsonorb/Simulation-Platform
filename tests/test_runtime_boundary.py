@@ -47,6 +47,8 @@ EXPECTED_DYNAMIC_LIFECYCLE_TOKENS = (
 EXPECTED_JOINT_CANDIDATE_SPAWNS = frozenset({
     ("src/platform/sim_platform_bringup/launch/p450_runtime.launch",
      "p450_D435i_1_spawn"),
+    ("src/platform/bunker_sim_runtime/launch/bunker_runtime.launch",
+     "spawn_bunker"),
     ("src/ground/bunker_aubo_gazebo/launch/combined_robot.launch",
      "spawn_bunker_aubo"),
     ("src/ground/bunker_aubo_gazebo/launch/combined_robot.launch",
@@ -363,10 +365,11 @@ class PackageBoundaryTest(unittest.TestCase):
         self.assertEqual(18, len(imported_records))
         self.assertEqual(set(imported), {item.name for item in imported_records})
         self.assertEqual(
-            {"sim_platform_assets", "sim_platform_bringup"},
+            {"bunker_sim_runtime", "sim_platform_assets",
+             "sim_platform_bringup"},
             {item.name for item in local_records},
         )
-        self.assertEqual(20, len(records))
+        self.assertEqual(21, len(records))
         self.assertEqual((), validate_packages(
             ROOT,
             imported,
@@ -526,14 +529,14 @@ class StartupSpawnBoundaryTest(unittest.TestCase):
         expected = (EXPECTED_JOINT_CANDIDATE_SPAWNS |
                     EXPECTED_STANDALONE_SMOKE_SPAWNS |
                     EXPECTED_INACTIVE_LEGACY_SPAWNS)
-        self.assertEqual((3, 3, 7), (
+        self.assertEqual((4, 3, 7), (
             len(JOINT_CANDIDATE_SPAWNS), len(STANDALONE_SMOKE_SPAWNS),
             len(INACTIVE_LEGACY_SPAWNS)))
         self.assertFalse(JOINT_CANDIDATE_SPAWNS & STANDALONE_SMOKE_SPAWNS)
         self.assertFalse(JOINT_CANDIDATE_SPAWNS & INACTIVE_LEGACY_SPAWNS)
         self.assertFalse(STANDALONE_SMOKE_SPAWNS & INACTIVE_LEGACY_SPAWNS)
         actual = discover_startup_spawns(ROOT)
-        self.assertEqual(13, len(actual))
+        self.assertEqual(14, len(actual))
         self.assertEqual(expected, set(actual))
         self.assertEqual((), validate_startup_spawns(ROOT))
 
