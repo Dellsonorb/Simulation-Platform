@@ -38,12 +38,14 @@ p450_repo_root="${p450_script_dir%/*}"
 p450_runtime_config="$p450_repo_root/config/p450_runtime.json"
 p450_runtime_validator="$p450_repo_root/tools/p450_runtime.py"
 p450_noetic_wrapper="$p450_repo_root/scripts/with_noetic_env.bash"
+p450_current_environment_validator="$p450_repo_root/scripts/validate_p450_current_environment.bash"
 p450_install_setup="$p450_repo_root/install/p450-clean/setup.bash"
 
 for p450_required_file in \
   "$p450_runtime_config" \
   "$p450_runtime_validator" \
   "$p450_noetic_wrapper" \
+  "$p450_current_environment_validator" \
   "$p450_install_setup"; do
   if [[ ! -f "$p450_required_file" ]]; then
     echo "P450 runtime prerequisite is missing: $p450_required_file" >&2
@@ -53,6 +55,10 @@ done
 
 if [[ ! -x "$p450_noetic_wrapper" ]]; then
   echo "Noetic environment wrapper is not executable: $p450_noetic_wrapper" >&2
+  exit 66
+fi
+if [[ ! -x "$p450_current_environment_validator" ]]; then
+  echo "current environment validator is not executable: $p450_current_environment_validator" >&2
   exit 66
 fi
 
@@ -272,31 +278,8 @@ exec "$p450_noetic_wrapper" \
     export GAZEBO_PLUGIN_PATH="$p450_final_gazebo_plugin_path"
     export LD_LIBRARY_PATH="$p450_final_ld_library_path"
 
-    p450_require_package_path() {
-      local p450_package="$1"
-      local p450_expected="$2"
-      local p450_observed
-      if ! p450_observed="$(/opt/ros/noetic/bin/rospack find "$p450_package" 2>/dev/null)" ||
-          [[ "$p450_observed" != "$p450_expected" ]]; then
-        echo "ROS package $p450_package resolved outside its runtime boundary: ${p450_observed:-missing}" >&2
-        return 65
-      fi
-    }
-
-    p450_require_package_path px4 "$p450_px4_root"
-    p450_require_package_path mavlink_sitl_gazebo \
-      "$p450_px4_root/Tools/sitl_gazebo"
-    for p450_package in \
-        sim_platform_bringup prometheus_msgs realsense_ros_gazebo \
-        prometheus_gazebo prometheus_uav_control brick_aerial_perception \
-        sim_platform_assets livox_laser_gazebo_plugins; do
-      p450_require_package_path "$p450_package" \
-        "$p450_repo_root/install/p450-clean/share/$p450_package"
-    done
-    for p450_package in gazebo_ros mavros tf2_ros; do
-      p450_require_package_path "$p450_package" \
-        "/opt/ros/noetic/share/$p450_package"
-    done
+    "$p450_repo_root/scripts/validate_p450_current_environment.bash" \
+      "$p450_repo_root" "$p450_px4_root"
 
     exec "$@"
   ' p450-runtime "$p450_repo_root" "$p450_px4_root" \

@@ -2,12 +2,14 @@
 """Offline contract for the platform-owned P450 + D435 runtime."""
 
 import copy
+import hashlib
 import json
 import math
 import os
 import re
 import shlex
 import socket
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -24,6 +26,7 @@ STANDALONE_LAUNCH = PACKAGE_ROOT / "launch" / "p450_standalone.launch"
 TF_CONTRACT = PACKAGE_ROOT / "config" / "p450_tf_contract.yaml"
 MID360_TF_CONTRACT = PACKAGE_ROOT / "config" / "p450_mid360_tf_contract.yaml"
 SMOKE_SCRIPT = REPOSITORY_ROOT / "scripts" / "smoke_p450_standalone.bash"
+MID360_SMOKE_SCRIPT = REPOSITORY_ROOT / "scripts" / "smoke_p450_mid360.bash"
 SENSOR_TF_OFFSETS = (
     REPOSITORY_ROOT
     / "src/p450/prometheus_uav_control/launch/sensor_tf_offset.yaml"
@@ -780,6 +783,52 @@ class ImportedSensorEvidenceTest(unittest.TestCase):
 
 
 class PackageAndSmokeContractTest(unittest.TestCase):
+    def test_smoke_sensor_profiles_share_one_harness_with_strict_branching(self):
+        source = _read(SMOKE_SCRIPT)
+        mid360_entrypoint = _read(MID360_SMOKE_SCRIPT)
+        self.assertTrue(os.access(str(MID360_SMOKE_SCRIPT), os.X_OK))
+        self.assertIn("P450_SENSOR_PROFILE=mid360", mid360_entrypoint)
+        self.assertIn('[[ $# -ne 0 ]]', mid360_entrypoint)
+        self.assertIn('/usr/bin/realpath -e -- "${BASH_SOURCE[0]}"',
+                      mid360_entrypoint)
+        self.assertIn(
+            'exec "$p450_entrypoint_dir/smoke_p450_standalone.bash"',
+            mid360_entrypoint)
+        self.assertNotIn("roslaunch", mid360_entrypoint)
+        self.assertNotIn("with_p450_env", mid360_entrypoint)
+
+        validation = source.index(
+            "P450_SENSOR_PROFILE must be exactly d435 or mid360")
+        self.assertLess(validation, source.index("p450_script_path="))
+        self.assertIn('P450_SENSOR_PROFILE="$p450_sensor_profile"', source)
+        self.assertIn(
+            'p450_log_parent="$p450_repo_root/$p450_profile_log_root"',
+            source)
+        self.assertIn(
+            'p450_create_private_run_directory "$p450_log_parent" '
+            '"$p450_run_id"', source)
+        self.assertNotIn(
+            'p450_log_dir="$p450_repo_root/$p450_profile_log_root/'
+            '$p450_run_id"', source)
+        self.assertIn('"${p450_profile_launch_args[@]}"', source)
+        self.assertIsNotNone(re.search(
+            r'if \[\[ "\$p450_sensor_profile" == "d435" \]\]; then.*?'
+            r'p450_check_topic_samples /uav1/camera/color/image_raw.*?'
+            r'p450_check_topic_samples /uav1/camera/imu.*?else.*?'
+            r'p450_mid360_topic_evidence',
+            source, flags=re.DOTALL))
+        self.assertIn("/uav1/livox/lidar", source)
+        self.assertIn("prometheus_msgs/LivoxCustomMsg", source)
+        self.assertIn("uav1/lidar_link", source)
+        self.assertIn("liblivox_laser_gazebo_plugins.so", source)
+        self.assertIn("libprotobuf", source)
+        self.assertIn("mid360_assets.json", source)
+        self.assertIn("p450_mid360_tf_contract.yaml", source)
+        self.assertIn(
+            "D435 profile unexpectedly loaded the Livox plugin", source)
+        self.assertIn(
+            "D435 profile unexpectedly advertised the Livox topic", source)
+
     def test_smoke_uses_a_fresh_run_local_px4_workdir(self):
         source = _read(SMOKE_SCRIPT)
         self.assertIn(
@@ -845,25 +894,163 @@ class PackageAndSmokeContractTest(unittest.TestCase):
             gps.parent.mkdir()
             gps.write_bytes(b"gps")
             groundtruth.write_bytes(b"groundtruth")
+            common_evidence = {
+                "checks": {
+                    "gazebo_node": True,
+                    "gzserver_process": True,
+                    "mavros_node": True,
+                    "mavros_state": True,
+                    "model": True,
+                    "prometheus_state": True,
+                    "px4_process": True,
+                    "uav_controller_node": True,
+                },
+                "model": {"count": 1, "name": "p450_D435i_0"},
+                "tf_authorities": {
+                    "uav1/base_link": ["/uav_control_main_1"],
+                    "uav1/camera_link": ["/uav_control_main_1"],
+                    "uav1/camera_depth_frame": [
+                        "/uav1/p450_tf_camera_depth"],
+                    "uav1/camera_ired1_frame": [
+                        "/uav1/p450_tf_camera_ired1"],
+                    "uav1/camera_ired2_frame": [
+                        "/uav1/p450_tf_camera_ired2"],
+                    "uav1/camera_imu_link": [
+                        "/uav1/p450_tf_camera_imu"],
+                    "uav1/d435i_link": [
+                        "/uav1/p450_tf_camera_d435i"],
+                    "uav1/camera_color_optical_frame": [
+                        "/uav1/p450_tf_camera_color_optical"],
+                    "uav1/camera_depth_optical_frame": [
+                        "/uav1/p450_tf_depth_optical"],
+                },
+            }
+            d435_evidence = {
+                "livox_absent": True,
+                "profile": "d435",
+                "tf_current": True,
+                "topic_gates": [
+                    "/uav1/camera/color/image_raw",
+                    "/uav1/camera/color/camera_info",
+                    "/uav1/camera/depth/image_raw",
+                    "/uav1/camera/depth/camera_info",
+                    "/uav1/camera/imu",
+                ],
+            }
+            install_prefix = REPOSITORY_ROOT / "install/p450-clean"
+            asset_root = install_prefix / "share/sim_platform_assets"
+            asset_manifest = json.loads(
+                (REPOSITORY_ROOT / "config/mid360_assets.json").read_text(
+                    encoding="utf-8"))
+            asset_files = []
+            for entry in asset_manifest["files"]:
+                path = (asset_root / entry["target"]).resolve(strict=True)
+                asset_files.append({
+                    "path": str(path),
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "target": entry["target"],
+                })
+            csv_path = (
+                asset_root / "models/MID360/scan_mode/mid360.csv"
+            ).resolve(strict=True)
+            dae_path = (
+                asset_root / "models/MID360/meshes/MID360.dae"
+            ).resolve(strict=True)
+            sdf_path = (
+                asset_root / "models/MID360/MID360.sdf"
+            ).resolve(strict=True)
+            protobuf = root / "libprotobuf.so.17.0.0"
+            protobuf.write_bytes(b"protobuf17")
+            installed_contract = (
+                install_prefix / "share/sim_platform_bringup/config" /
+                "p450_mid360_tf_contract.yaml"
+            ).resolve(strict=True)
+            tf_contract = yaml.safe_load(
+                installed_contract.read_text(encoding="utf-8"))
+            transform = {
+                "parent": tf_contract["composite"]["parent"],
+                "child": tf_contract["composite"]["child"],
+                "translation": tf_contract["composite"]["translation_m"],
+                "rotation_xyzw": tf_contract["composite"]["rotation_xyzw"],
+            }
+            topic = {
+                "topic": "/uav1/livox/lidar",
+                "type": "prometheus_msgs/LivoxCustomMsg",
+                "publishers": ["/gazebo"],
+                "samples": [
+                    {"stamp": {"secs": 1, "nsecs": value},
+                     "frame_id": "uav1/lidar_link", "point_num": 1,
+                     "points": [{"x": float(value)}]}
+                    for value in (10, 20, 30)
+                ],
+            }
+            mid360_evidence = {
+                "assets": {
+                    "csv": str(csv_path), "dae": str(dae_path),
+                    "files": asset_files, "sdf": str(sdf_path),
+                    "uris": ["model://MID360/meshes/MID360.dae"],
+                },
+                "csv_log": {"csv": str(csv_path)},
+                "maps": {
+                    "plugin": str((install_prefix / "lib" /
+                        "liblivox_laser_gazebo_plugins.so").resolve(strict=True)),
+                    "protobuf": [str(protobuf.resolve(strict=True))],
+                    "protobuf_major": 17,
+                },
+                "profile": "mid360",
+                "tf": {
+                    "authority": "/uav_control_main_1",
+                    "contract": str(installed_contract),
+                    "tolerance": tf_contract["runtime_tolerance"],
+                    "transform": transform,
+                },
+                "topic": topic,
+            }
+            common_path = root / "common.json"
+            d435_path = root / "d435.json"
+            mid360_path = root / "mid360.json"
+            common_path.write_text(json.dumps(common_evidence), encoding="utf-8")
+            d435_path.write_text(json.dumps(d435_evidence), encoding="utf-8")
+            mid360_path.write_text(json.dumps(mid360_evidence), encoding="utf-8")
+            malformed_path = root / "malformed.json"
+            malformed_path.write_text("{not-json", encoding="utf-8")
             cases = (
-                ("PASS", "0", "0", "0", 0, 0, False),
-                ("FAIL", "7", "137", "1", 7, 137, True),
-                ("FAIL", "9", "", "1", 9, None, True),
+                ("PASS", "0", "0", "0", "d435", common_path,
+                 d435_path, 0, 0, False, common_evidence, d435_evidence),
+                ("PASS", "0", "0", "0", "mid360", common_path,
+                 mid360_path, 0, 0, False, common_evidence, mid360_evidence),
+                ("FAIL", "7", "137", "1", "mid360", Path("missing"),
+                 Path("missing"), 7, 137, True, None, None),
+                ("FAIL", "9", "", "1", "d435", malformed_path,
+                 malformed_path, 9, None, True, None, None),
             )
             for (verdict, script_status, launcher_status, escalated,
+                 profile, common_fixture, sensor_fixture,
                  expected_script_status, expected_launcher_status,
-                 expected_escalated) in cases:
+                 expected_escalated, expected_common, expected_sensor) in cases:
+                if profile == "mid360" and expected_common is not None:
+                    expected_common = copy.deepcopy(expected_common)
+                    expected_common["tf_authorities"]["uav1/lidar_link"] = [
+                        "/uav_control_main_1"]
+                    common_path.write_text(
+                        json.dumps(expected_common), encoding="utf-8")
+                elif expected_common is not None:
+                    common_path.write_text(
+                        json.dumps(expected_common), encoding="utf-8")
                 with self.subTest(verdict=verdict,
                                   launcher_status=launcher_status):
                     manifest = root / (
-                        "result-%s-%s.json" %
-                        (verdict.lower(), launcher_status or "none"))
+                        "result-%s-%s-%s.json" %
+                        (verdict.lower(), profile,
+                         launcher_status or "none"))
                     result = subprocess.run(
                         [
                             str(SMOKE_SCRIPT), "--test-result-manifest",
                             str(manifest), verdict, script_status,
                             launcher_status, escalated, "run id/with spaces",
-                            "sitl smoke workdir", str(gps), str(groundtruth),
+                            "sitl smoke workdir", profile, str(gps),
+                            str(groundtruth), str(common_fixture),
+                            str(sensor_fixture),
                         ],
                         cwd=str(REPOSITORY_ROOT),
                         env={
@@ -884,20 +1071,233 @@ class PackageAndSmokeContractTest(unittest.TestCase):
                     )
                     self.assertEqual(
                         {
-                            "schema_version": 1,
+                            "schema_version": 2,
                             "verdict": verdict,
                             "script_status": expected_script_status,
                             "launcher_status": expected_launcher_status,
                             "shutdown_escalated": expected_escalated,
                             "run_id": "run id/with spaces",
                             "px4_workdir": "sitl smoke workdir",
+                            "sensor_profile": profile,
                             "plugins": {
                                 "gps": str(gps.resolve()),
                                 "groundtruth": str(groundtruth.resolve()),
                             },
+                            "evidence": {
+                                "common": expected_common,
+                                "sensor": expected_sensor,
+                            },
                         },
                         json.loads(manifest.read_text(encoding="utf-8")),
                     )
+
+            for label, launcher_status, escalated in (
+                    ("missing launcher", "", "0"),
+                    ("failed launcher", "7", "0"),
+                    ("escalated shutdown", "0", "1")):
+                with self.subTest(false_pass=label):
+                    manifest = root / (label.replace(" ", "-") + ".json")
+                    result = subprocess.run(
+                        [
+                            str(SMOKE_SCRIPT), "--test-result-manifest",
+                            str(manifest), "PASS", "0", launcher_status,
+                            escalated, "run", "work", "d435", str(gps),
+                            str(groundtruth), str(common_path), str(d435_path),
+                        ],
+                        cwd=str(REPOSITORY_ROOT), env={
+                            "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8",
+                            "LC_ALL": "C.UTF-8"}, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, text=True, check=False)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertFalse(manifest.exists())
+
+            nested_mutations = (
+                ("maps plugin missing",
+                 lambda value: value["maps"].pop("plugin")),
+                ("maps protobuf path missing",
+                 lambda value: value["maps"].pop("protobuf")),
+                ("asset digest tampered",
+                 lambda value: value["assets"]["files"][0].update(
+                     sha256="0" * 64)),
+                ("asset csv cross link",
+                 lambda value: value["csv_log"].update(csv=str(dae_path))),
+                ("topic type tampered",
+                 lambda value: value["topic"].update(type="x/Msg")),
+                ("topic sample tampered",
+                 lambda value: value["topic"]["samples"][1].update(
+                     frame_id="/uav1/lidar_link")),
+                ("tf contract tampered",
+                 lambda value: value["tf"].update(contract=str(csv_path))),
+                ("tf tolerance bool",
+                 lambda value: value["tf"]["tolerance"].update(
+                     translation_m=True)),
+                ("tf transform tampered",
+                 lambda value: value["tf"]["transform"]["translation"].__setitem__(
+                     0, value["tf"]["transform"]["translation"][0] + 1.0)),
+            )
+            strict_mid_common = copy.deepcopy(common_evidence)
+            strict_mid_common["tf_authorities"]["uav1/lidar_link"] = [
+                "/uav_control_main_1"]
+            common_path.write_text(
+                json.dumps(strict_mid_common), encoding="utf-8")
+            for label, mutate in nested_mutations:
+                with self.subTest(invalid_mid360=label):
+                    invalid_sensor = copy.deepcopy(mid360_evidence)
+                    mutate(invalid_sensor)
+                    mid360_path.write_text(
+                        json.dumps(invalid_sensor), encoding="utf-8")
+                    manifest = root / ("invalid-" + label.replace(" ", "-") +
+                                       ".json")
+                    result = subprocess.run(
+                        [str(SMOKE_SCRIPT), "--test-result-manifest",
+                         str(manifest), "PASS", "0", "0", "0", "run",
+                         "work", "mid360", str(gps), str(groundtruth),
+                         str(common_path), str(mid360_path)],
+                        cwd=str(REPOSITORY_ROOT), env={
+                            "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8",
+                            "LC_ALL": "C.UTF-8"}, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, text=True, check=False)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertFalse(manifest.exists())
+
+            tolerant_sensor = copy.deepcopy(mid360_evidence)
+            tolerant_sensor["tf"]["transform"]["translation"][0] += 5e-7
+            tolerant_sensor["tf"]["transform"]["rotation_xyzw"][1] -= 5e-7
+            mid360_path.write_text(
+                json.dumps(tolerant_sensor), encoding="utf-8")
+            tolerant_manifest = root / "float32-tolerant-pass.json"
+            tolerant_result = subprocess.run(
+                [str(SMOKE_SCRIPT), "--test-result-manifest",
+                 str(tolerant_manifest), "PASS", "0", "0", "0", "run",
+                 "work", "mid360", str(gps), str(groundtruth),
+                 str(common_path), str(mid360_path)],
+                cwd=str(REPOSITORY_ROOT), env={
+                    "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8",
+                    "LC_ALL": "C.UTF-8"}, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, check=False)
+            self.assertEqual(0, tolerant_result.returncode,
+                             tolerant_result.stderr)
+            self.assertEqual(
+                tolerant_sensor["tf"]["transform"],
+                json.loads(tolerant_manifest.read_text(encoding="utf-8"))
+                ["evidence"]["sensor"]["tf"]["transform"])
+
+            numeric_mutations = (
+                ("translation beyond tolerance", lambda value:
+                 value["tf"]["transform"]["translation"].__setitem__(
+                     0, value["tf"]["transform"]["translation"][0] + 2e-6)),
+                ("quaternion beyond tolerance", lambda value:
+                 value["tf"]["transform"]["rotation_xyzw"].__setitem__(
+                     1, value["tf"]["transform"]["rotation_xyzw"][1] + 2e-6)),
+                ("translation bool", lambda value:
+                 value["tf"]["transform"]["translation"].__setitem__(1, True)),
+                ("quaternion nan", lambda value:
+                 value["tf"]["transform"]["rotation_xyzw"].__setitem__(
+                     1, float("nan"))),
+            )
+            for label, mutate in numeric_mutations:
+                with self.subTest(invalid_manifest_tf=label):
+                    invalid_sensor = copy.deepcopy(mid360_evidence)
+                    mutate(invalid_sensor)
+                    mid360_path.write_text(
+                        json.dumps(invalid_sensor), encoding="utf-8")
+                    manifest = root / ("numeric-" + label.replace(" ", "-") +
+                                       ".json")
+                    result = subprocess.run(
+                        [str(SMOKE_SCRIPT), "--test-result-manifest",
+                         str(manifest), "PASS", "0", "0", "0", "run",
+                         "work", "mid360", str(gps), str(groundtruth),
+                         str(common_path), str(mid360_path)],
+                        cwd=str(REPOSITORY_ROOT), env={
+                            "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8",
+                            "LC_ALL": "C.UTF-8"}, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, text=True, check=False)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertFalse(manifest.exists())
+
+    def test_smoke_result_manifest_rejects_false_pass_and_never_overwrites(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            gps = root / "libgazebo_gps_plugin.so"
+            groundtruth = root / "libgazebo_groundtruth_plugin.so"
+            gps.write_bytes(b"gps")
+            groundtruth.write_bytes(b"groundtruth")
+            missing = root / "missing-evidence.json"
+            base = [
+                str(SMOKE_SCRIPT), "--test-result-manifest", "RESULT",
+                "PASS", "0", "0", "0", "run", "work", "d435",
+                str(gps), str(groundtruth), str(missing), str(missing),
+            ]
+            result_path = root / "false-pass.json"
+            command = list(base)
+            command[2] = str(result_path)
+            result = subprocess.run(
+                command, cwd=str(REPOSITORY_ROOT), env={
+                    "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8",
+                    "LC_ALL": "C.UTF-8"}, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, check=False)
+            self.assertNotEqual(0, result.returncode)
+            self.assertFalse(result_path.exists())
+
+            fallback_path = root / "fallback-fail.json"
+            fallback = list(base)
+            fallback[1] = "--test-result-fallback"
+            fallback[2] = str(fallback_path)
+            result = subprocess.run(
+                fallback, cwd=str(REPOSITORY_ROOT), env={
+                    "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8",
+                    "LC_ALL": "C.UTF-8"}, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, check=False)
+            self.assertNotEqual(0, result.returncode)
+            self.assertTrue(fallback_path.is_file(), result.stderr)
+            fallback_payload = json.loads(
+                fallback_path.read_text(encoding="utf-8"))
+            self.assertEqual(2, fallback_payload["schema_version"])
+            self.assertEqual("FAIL", fallback_payload["verdict"])
+            self.assertEqual(1, fallback_payload["script_status"])
+            self.assertEqual(
+                {"common": None, "sensor": None},
+                fallback_payload["evidence"])
+            self.assertEqual(
+                [], list(root.glob(".fallback-fail.json.*.tmp")),
+                "a rejected PASS write must not leave a temporary manifest")
+
+            existing = root / "existing.json"
+            existing.write_text('{"sentinel":true}\n', encoding="utf-8")
+            command[2] = str(existing)
+            command[3:6] = ["FAIL", "9", ""]
+            result = subprocess.run(
+                command, cwd=str(REPOSITORY_ROOT), env={
+                    "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8",
+                    "LC_ALL": "C.UTF-8"}, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, check=False)
+            self.assertNotEqual(0, result.returncode)
+            self.assertEqual(
+                {"sentinel": True},
+                json.loads(existing.read_text(encoding="utf-8")))
+
+            existing_fallback = list(base)
+            existing_fallback[1] = "--test-result-fallback"
+            existing_fallback[2] = str(existing)
+            result = subprocess.run(
+                existing_fallback, cwd=str(REPOSITORY_ROOT), env={
+                    "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8",
+                    "LC_ALL": "C.UTF-8"}, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, check=False)
+            self.assertNotEqual(0, result.returncode)
+            self.assertEqual(
+                {"sentinel": True},
+                json.loads(existing.read_text(encoding="utf-8")))
+
+            invalid_profile = list(base)
+            invalid_profile[2] = str(root / "invalid-profile.json")
+            invalid_profile[9] = "livox"
+            result = subprocess.run(
+                invalid_profile, cwd=str(REPOSITORY_ROOT), env={
+                    "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8",
+                    "LC_ALL": "C.UTF-8"}, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, check=False)
+            self.assertNotEqual(0, result.returncode)
 
     def test_package_installs_runtime_assets_and_declares_dependencies(self):
         cmake = _read(PACKAGE_ROOT / "CMakeLists.txt")
@@ -1061,7 +1461,8 @@ class PackageAndSmokeContractTest(unittest.TestCase):
                 (
                     "clean.log",
                     "INFO [px4] Startup script returned successfully\n"
-                    "process has finished cleanly\n",
+                    "process has finished cleanly\n"
+                    "CSV statistics: 10000 rows loaded\n",
                     0,
                 ),
                 ("startup-missing.log", "process has finished cleanly\n", 1),
@@ -1084,6 +1485,24 @@ class PackageAndSmokeContractTest(unittest.TestCase):
                 ),
                 ("reboot.log", "[uav_controller_uav1] Reboot PX4!\n", 1),
                 ("died.log", "[gazebo-2] process has died [pid 42]\n", 1),
+                (
+                    "livox-csv-missing.log",
+                    "Startup script returned successfully\n"
+                    "cannot get csv file!/tmp/missing.csvwill return !\n",
+                    1,
+                ),
+                (
+                    "livox-frame-empty.log",
+                    "Startup script returned successfully\n"
+                    "Livox frameName must not be empty\n",
+                    1,
+                ),
+                (
+                    "livox-plugin-load.log",
+                    "Startup script returned successfully\n"
+                    "Failed to load plugin liblivox_laser_gazebo_plugins.so\n",
+                    1,
+                ),
                 ("missing.log", None, 66),
             )
             for filename, contents, expected_status in cases:
@@ -1203,6 +1622,17 @@ class PackageAndSmokeContractTest(unittest.TestCase):
             cases = (
                 ("local.maps", prefix + proc_path(local_plugin) + "\n", 0),
                 (
+                    "local-plus-deleted.maps",
+                    prefix + proc_path(local_plugin) + "\n" +
+                    prefix + proc_path(local_plugin) + " (deleted)\n",
+                    1,
+                ),
+                (
+                    "local-deleted-only.maps",
+                    prefix + proc_path(local_plugin) + " (deleted)\n",
+                    1,
+                ),
+                (
                     "both.maps",
                     prefix + proc_path(local_plugin) + "\n" +
                     prefix + proc_path(external_plugin) + "\n",
@@ -1249,6 +1679,268 @@ class PackageAndSmokeContractTest(unittest.TestCase):
                         "stdout={!r} stderr={!r}".format(
                             result.stdout, result.stderr),
                     )
+
+    def test_smoke_waits_for_complete_profile_plugin_mappings(self):
+        source = _read(SMOKE_SCRIPT)
+        readiness_mode = (
+            'if [[ "${1:-}" == "--test-plugin-map-readiness" ]]')
+        self.assertIn(readiness_mode, source)
+        self.assertIn(
+            'p450_wait_until "complete Gazebo plugin mappings"', source)
+        self.assertLess(
+            source.index(
+                'p450_wait_until "complete Gazebo plugin mappings"'),
+            source.index('p450_check_state /uav1/mavros/state'),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            local = root / "SIM overlay"
+            external = root / "external PX4"
+            installed = root / "installed Livox"
+            system = root / "system protobuf"
+            for directory in (local, external, installed, system):
+                directory.mkdir()
+
+            gps = local / "libgazebo_gps_plugin.so"
+            groundtruth = local / "libgazebo_groundtruth_plugin.so"
+            external_gps = external / gps.name
+            external_groundtruth = external / groundtruth.name
+            livox = installed / "liblivox_laser_gazebo_plugins.so"
+            protobuf = system / "libprotobuf.so.17.0.0"
+            for artifact in (
+                    gps, groundtruth, external_gps, external_groundtruth,
+                    livox, protobuf):
+                artifact.write_bytes(b"fixture")
+
+            prefix = "7f000000-7f001000 r-xp 00000000 08:01 42 "
+
+            def mapping(path):
+                return prefix + str(path).replace(" ", r"\040") + "\n"
+
+            early_maps = root / "early.maps"
+            early_maps.write_text(
+                mapping(gps) + mapping(livox) + mapping(protobuf),
+                encoding="utf-8",
+            )
+            ready_maps = root / "ready.maps"
+            ready_maps.write_text(
+                mapping(gps) + mapping(groundtruth) +
+                mapping(livox) + mapping(protobuf),
+                encoding="utf-8",
+            )
+
+            def probe(maps, evidence, profile="mid360"):
+                return subprocess.run(
+                    [
+                        str(SMOKE_SCRIPT), "--test-plugin-map-readiness",
+                        profile, str(gps), str(external_gps),
+                        str(groundtruth), str(external_groundtruth),
+                        str(livox), str(maps), str(evidence),
+                    ],
+                    cwd=str(REPOSITORY_ROOT),
+                    env={
+                        "PATH": "/usr/bin:/bin",
+                        "LANG": "C.UTF-8",
+                        "LC_ALL": "C.UTF-8",
+                    },
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=3.0,
+                    check=False,
+                )
+
+            early_evidence = root / "early-evidence.json"
+            early = probe(early_maps, early_evidence)
+            self.assertNotEqual(0, early.returncode)
+            self.assertFalse(early_evidence.exists())
+
+            ready_evidence = root / "ready-evidence.json"
+            ready = probe(ready_maps, ready_evidence)
+            self.assertEqual(
+                0, ready.returncode,
+                "stdout={!r} stderr={!r}".format(
+                    ready.stdout, ready.stderr),
+            )
+            self.assertEqual(
+                {
+                    "plugin": str(livox.resolve(strict=True)),
+                    "protobuf": [str(protobuf.resolve(strict=True))],
+                    "protobuf_major": 17,
+                },
+                json.loads(ready_evidence.read_text(encoding="utf-8")),
+            )
+
+            malformed_maps = root / "malformed.maps"
+            malformed_maps.write_text(
+                mapping(gps) + mapping(groundtruth) + mapping(livox),
+                encoding="utf-8",
+            )
+            malformed_evidence = root / "malformed-evidence.json"
+            malformed = probe(malformed_maps, malformed_evidence)
+            self.assertEqual(65, malformed.returncode)
+            self.assertFalse(malformed_evidence.exists())
+
+            evidence_directory = root / "evidence-directory"
+            evidence_directory.mkdir()
+            directory_result = probe(ready_maps, evidence_directory)
+            self.assertNotEqual(0, directory_result.returncode)
+            self.assertEqual([], list(evidence_directory.iterdir()))
+
+            d435_evidence = root / "d435-evidence.json"
+            d435_ready = root / "d435-ready.maps"
+            d435_ready.write_text(
+                mapping(gps) + mapping(groundtruth), encoding="utf-8")
+            d435 = probe(d435_ready, d435_evidence, profile="d435")
+            self.assertEqual(0, d435.returncode, d435.stderr)
+            self.assertFalse(d435_evidence.exists())
+            d435_with_livox = probe(
+                ready_maps, d435_evidence, profile="d435")
+            self.assertNotEqual(0, d435_with_livox.returncode)
+            self.assertFalse(d435_evidence.exists())
+
+    def test_smoke_refreshes_read_only_proc_maps_snapshot_atomically(self):
+        source = _read(SMOKE_SCRIPT)
+        guard = 'if [[ "${1:-}" == "--test-refresh-maps-snapshot" ]]'
+        self.assertIn(guard, source)
+        self.assertLess(source.index(guard), source.index("p450_script_path="))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            live_maps = root / "proc-maps"
+            snapshot = root / "gzserver.maps"
+            snapshot.write_text("stale\n", encoding="utf-8")
+            snapshot.chmod(0o444)
+
+            def refresh(expected):
+                live_maps.write_text(expected, encoding="utf-8")
+                result = subprocess.run(
+                    [
+                        str(SMOKE_SCRIPT), "--test-refresh-maps-snapshot",
+                        str(live_maps), str(snapshot),
+                    ],
+                    cwd=str(REPOSITORY_ROOT),
+                    env={
+                        "PATH": "/usr/bin:/bin",
+                        "LANG": "C.UTF-8",
+                        "LC_ALL": "C.UTF-8",
+                    },
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=3.0,
+                    check=False,
+                )
+                self.assertEqual(
+                    0, result.returncode,
+                    "stdout={!r} stderr={!r}".format(
+                        result.stdout, result.stderr),
+                )
+                self.assertEqual(expected, snapshot.read_text(encoding="utf-8"))
+                self.assertTrue(snapshot.stat().st_mode & stat.S_IWUSR)
+                self.assertEqual([], list(root.glob(".gzserver.maps.tmp.*")))
+
+            refresh("early\n")
+            snapshot.chmod(0o444)
+            refresh("ready\n")
+
+            directory_parent = root / "directory-target-parent"
+            directory_parent.mkdir()
+            directory_target = directory_parent / "gzserver.maps"
+            directory_target.mkdir()
+            rejected = subprocess.run(
+                [
+                    str(SMOKE_SCRIPT), "--test-refresh-maps-snapshot",
+                    str(live_maps), str(directory_target),
+                ],
+                cwd=str(REPOSITORY_ROOT),
+                env={
+                    "PATH": "/usr/bin:/bin",
+                    "LANG": "C.UTF-8",
+                    "LC_ALL": "C.UTF-8",
+                },
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=3.0,
+                check=False,
+            )
+            self.assertNotEqual(0, rejected.returncode)
+            self.assertEqual([], list(directory_target.iterdir()))
+            self.assertEqual(
+                [], list(directory_parent.glob(".gzserver.maps.tmp.*")))
+
+    def test_smoke_creates_private_run_leaf_exclusively(self):
+        source = _read(SMOKE_SCRIPT)
+        guard = 'if [[ "${1:-}" == "--test-private-run-directory" ]]'
+        self.assertIn(guard, source)
+        self.assertIn("umask 077", source)
+        self.assertLess(source.index(guard), source.index("p450_script_path="))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary) / "profile logs"
+            parent.mkdir(mode=0o775)
+            run_id = "20260901T001122Z-12345"
+            command = [
+                str(SMOKE_SCRIPT), "--test-private-run-directory",
+                str(parent), run_id,
+            ]
+            environment = {
+                "PATH": "/usr/bin:/bin",
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+            }
+
+            created = subprocess.run(
+                command,
+                cwd=str(REPOSITORY_ROOT),
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=3.0,
+                check=False,
+            )
+            self.assertEqual(0, created.returncode, created.stderr)
+            leaf = parent / run_id
+            self.assertEqual(str(leaf) + "\n", created.stdout)
+            self.assertTrue(leaf.is_dir())
+            self.assertFalse(leaf.is_symlink())
+            self.assertEqual(0o700, stat.S_IMODE(leaf.stat().st_mode))
+
+            duplicate = subprocess.run(
+                command,
+                cwd=str(REPOSITORY_ROOT),
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=3.0,
+                check=False,
+            )
+            self.assertNotEqual(0, duplicate.returncode)
+            self.assertTrue(leaf.is_dir())
+
+            symlink_id = "20260901T001123Z-12345"
+            outside = Path(temporary) / "outside"
+            outside.mkdir()
+            (parent / symlink_id).symlink_to(outside, target_is_directory=True)
+            symlink = subprocess.run(
+                [
+                    str(SMOKE_SCRIPT), "--test-private-run-directory",
+                    str(parent), symlink_id,
+                ],
+                cwd=str(REPOSITORY_ROOT),
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=3.0,
+                check=False,
+            )
+            self.assertNotEqual(0, symlink.returncode)
+            self.assertEqual([], list(outside.iterdir()))
 
     def test_smoke_render_probe_requires_local_x_capability(self):
         source = _read(SMOKE_SCRIPT)
