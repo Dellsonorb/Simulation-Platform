@@ -76,6 +76,7 @@
     "src/p450/prometheus_uav_control/package.xml": "a49a6ca0f185f56e0af76aa1113dc857d6ca77603fbac9a8b660829c87c83b0f",
     "src/p450/realsense_ros_gazebo/CMakeLists.txt": "01962849792d0276cd322ce9682c4cb63106710225e963dfea5f900c02bf4f53",
     "src/p450/realsense_ros_gazebo/package.xml": "9fad1bcb932c08fc67d2e7e2630acc96f95a83ec8053a4c478a7ca300426bc3e",
-    "src/p450/realsense_ros_gazebo/src/RealSensePlugin.cpp": "2f14fd26e7f76e8e1d5b268de7420f96dbc4d48f5b0b0a8f527c005fb7082d52"
+    "src/p450/realsense_ros_gazebo/src/RealSensePlugin.cpp": "2f14fd26e7f76e8e1d5b268de7420f96dbc4d48f5b0b0a8f527c005fb7082d52",
+    "src/vendor/bunker_description/CMakeLists.txt": "32e596f3222f4e52a94a678f0c0b1dbad667293306f1b77d1e4dcfa3c7072acb"
   }
 }

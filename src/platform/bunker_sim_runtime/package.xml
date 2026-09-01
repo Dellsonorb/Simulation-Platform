@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>bunker_sim_runtime</name>
+  <version>1.0.0</version>
+  <description>Standalone BUNKER runtime for Simulation Platform V1.0.</description>
+  <maintainer email="sim-platform@example.invalid">Simulation Platform Maintainers</maintainer>
+  <license>BSD-3-Clause</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <exec_depend>bunker_description</exec_depend>
+  <exec_depend>gazebo_plugins</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>roslaunch</exec_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <test_depend>gazebo_msgs</test_depend>
+  <test_depend>liburdfdom-tools</test_depend>
+  <test_depend>rosgraph</test_depend>
+  <test_depend>rosgraph_msgs</test_depend>
+  <test_depend>rostest</test_depend>
+  <test_depend>rosunit</test_depend>
+  <test_depend>tf2_msgs</test_depend>
+</package>

@@ -21,6 +21,7 @@ FORBIDDEN_PATH_PARTS = {
     ".pytest_cache",
 }
 EXPECTED_MATERIALIZED_LOCAL_PACKAGES = frozenset({
+    "bunker_sim_runtime",
     "sim_platform_bringup",
     "sim_platform_assets",
 })
@@ -63,7 +64,7 @@ class ImportedLayoutTest(unittest.TestCase):
     def test_manifest_declares_exact_import_counts(self):
         self.assertEqual(18, len(self.imported_packages))
         self.assertEqual(11, len(self.manifest.auxiliary_imports))
-        self.assertEqual(5, len(self.local_packages))
+        self.assertEqual(6, len(self.local_packages))
 
     def test_all_required_paths_are_directories(self):
         self.assertEqual(10, len(self.manifest.required_paths))

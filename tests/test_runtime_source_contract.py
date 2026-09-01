@@ -125,6 +125,12 @@ EXPECTED_PACKAGE_RECORDS = {
         "src/platform/sim_platform_assets",
         False,
     ),
+    "bunker_sim_runtime": (
+        "platform",
+        None,
+        "src/platform/bunker_sim_runtime",
+        False,
+    ),
     "ground_runtime_compat": (
         "platform",
         None,

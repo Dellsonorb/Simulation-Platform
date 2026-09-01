@@ -64,6 +64,7 @@ EXACT_REMOVED = frozenset({
 })
 
 EXACT_MODIFIED = frozenset({
+    "src/vendor/bunker_description/CMakeLists.txt",
     "src/p450/brick_aerial_perception/CMakeLists.txt",
     "src/p450/brick_aerial_perception/launch/m1_aerial_perception.launch",
     "src/p450/brick_aerial_perception/package.xml",
@@ -280,7 +281,7 @@ class RuntimeExtractionTest(unittest.TestCase):
         self.assertEqual(sorted(EXACT_MODIFIED),
                          list(overlay["modified"]))
         self.assertEqual(42, len(overlay["removed"]))
-        self.assertEqual(29, len(overlay["modified"]))
+        self.assertEqual(30, len(overlay["modified"]))
 
     def test_removed_files_are_tracked_upstream_and_absent_now(self):
         recorded = self.provenance["files"]

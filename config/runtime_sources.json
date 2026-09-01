@@ -126,6 +126,12 @@
       "destination": "src/vendor/roboticsgroup_gazebo_plugins",
       "imported": true
     },
+    "bunker_sim_runtime": {
+      "role": "platform",
+      "source": null,
+      "destination": "src/platform/bunker_sim_runtime",
+      "imported": false
+    },
     "sim_platform_bringup": {
       "role": "platform",
       "source": null,
