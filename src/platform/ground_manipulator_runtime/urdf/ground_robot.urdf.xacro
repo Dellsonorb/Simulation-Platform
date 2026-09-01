@@ -1,0 +1,84 @@
+<?xml version="1.0"?>
+<robot name="bunker_aubo" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:include filename="$(find bunker_description)/urdf/bunker.urdf.xacro"/>
+  <xacro:include filename="$(find aubo_description)/urdf/aubo_i5_macro.xacro"/>
+  <xacro:include filename="$(find dh_ag95_description)/urdf/ag95_macro.xacro"/>
+  <xacro:include filename="$(find ground_manipulator_runtime)/urdf/d435.xacro"/>
+
+  <link name="aubo_mount_link">
+    <inertial>
+      <mass value="5.0"/>
+      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+      <inertia ixx="0.025" ixy="0" ixz="0"
+               iyy="0.025" iyz="0" izz="0.025"/>
+    </inertial>
+    <visual><geometry><cylinder radius="0.14" length="0.08"/></geometry></visual>
+    <collision><geometry><cylinder radius="0.14" length="0.08"/></geometry></collision>
+  </link>
+  <joint name="aubo_mount_joint" type="fixed">
+    <parent link="base_link"/><child link="aubo_mount_link"/>
+    <origin xyz="0.15 0 0.042" rpy="0 0 0"/>
+  </joint>
+
+  <xacro:aubo_i5 prefix="" parent="aubo_mount_link"
+                  hw_interface="hardware_interface/PositionJointInterface">
+    <origin xyz="0 0 0.08" rpy="0 0 0"/>
+  </xacro:aubo_i5>
+  <xacro:dh_ag95_gripper prefix="" parent="ee_link"
+      transmission_hw_interface="hardware_interface/PositionJointInterface">
+    <origin xyz="0 0 0" rpy="${pi/2} ${pi} ${pi/2}"/>
+  </xacro:dh_ag95_gripper>
+
+  <link name="gripper_tcp_link"/>
+  <joint name="gripper_tcp_joint" type="fixed">
+    <parent link="ee_link"/><child link="gripper_tcp_link"/>
+    <origin xyz="0.20 0 0" rpy="0 0 0"/>
+  </joint>
+  <xacro:ground_d435 parent="ee_link"/>
+
+  <link name="lidar_2d_link"/>
+  <joint name="lidar_2d_joint" type="fixed">
+    <parent link="base_link"/><child link="lidar_2d_link"/>
+    <origin xyz="-0.30 0 0.25" rpy="0 0 0"/>
+  </joint>
+
+  <gazebo reference="base_link">
+    <mu1>1.0</mu1><mu2>1.0</mu2>
+  </gazebo>
+  <gazebo reference="lidar_2d_link">
+    <sensor name="bunker_lidar_2d" type="ray">
+      <always_on>true</always_on>
+      <update_rate>15.0</update_rate>
+      <ray>
+        <scan><horizontal>
+          <samples>720</samples><resolution>1</resolution>
+          <min_angle>-${pi}</min_angle><max_angle>${pi}</max_angle>
+        </horizontal></scan>
+        <range><min>0.12</min><max>8.0</max><resolution>0.01</resolution></range>
+        <noise><type>gaussian</type><mean>0</mean><stddev>0.002</stddev></noise>
+      </ray>
+      <plugin name="bunker_laser" filename="libgazebo_ros_laser.so">
+        <robotNamespace>/ground</robotNamespace>
+        <topicName>scan</topicName>
+        <frameName>ground/lidar_2d_link</frameName>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <gazebo>
+    <plugin name="bunker_planar_move"
+            filename="libbunker_planar_move_plugin.so">
+      <robotNamespace>/ground</robotNamespace>
+      <commandTopic>cmd_vel_safe</commandTopic>
+      <odometryTopic>odom</odometryTopic>
+      <odometryFrame>ground/odom</odometryFrame>
+      <robotBaseFrame>ground/base_link</robotBaseFrame>
+      <odometryRate>50.0</odometryRate>
+      <cmdTimeout>0.5</cmdTimeout>
+    </plugin>
+    <plugin name="gazebo_ros_control" filename="libgazebo_ros_control.so">
+      <robotNamespace>/ground</robotNamespace>
+      <robotParam>/ground/robot_description</robotParam>
+    </plugin>
+  </gazebo>
+</robot>

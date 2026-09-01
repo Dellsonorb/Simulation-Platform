@@ -16,6 +16,22 @@ INCOMPATIBLE_FIXED_JOINT_TAGS = (
     "axis", "limit", "dynamics", "calibration", "mimic",
     "safety_controller",
 )
+EXPECTED_CONTROLLED_JOINTS = {
+    "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+    "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
+    "left_outer_knuckle_joint",
+}
+EXPECTED_PLUGIN_LIBRARIES = {
+    "libbunker_planar_move_plugin.so",
+    "libgazebo_ros_laser.so",
+    "libgazebo_ros_control.so",
+    "libroboticsgroup_gazebo_mimic_joint_plugin.so",
+    "libgazebo_ros_camera.so",
+    "libgazebo_ros_openni_kinect.so",
+}
+EXPECTED_SENSORS = {
+    "bunker_lidar_2d", "ground_d435_color", "ground_d435_depth",
+}
 
 
 class RenderError(ValueError):
@@ -81,6 +97,9 @@ def transform_robot_tree(root):
     joint_sources = {joint: joint.get("name") for joint in joints}
     link_map = _declaration_map(links, "link", FRAME_PREFIX)
     joint_map = _declaration_map(joints, "joint")
+    sdf_joints = root.findall("./gazebo/joint")
+    sdf_joint_sources = {joint: joint.get("name") for joint in sdf_joints}
+    sdf_joint_map = _declaration_map(sdf_joints, "Gazebo joint")
 
     _replace_bunker_collisions(links, link_sources)
     for link in links:
@@ -121,12 +140,13 @@ def transform_robot_tree(root):
                 gazebo.set("reference", link_map[reference])
             elif reference in joint_map:
                 gazebo.set("reference", joint_map[reference])
+            elif reference in sdf_joint_map:
+                gazebo.set("reference", sdf_joint_map[reference])
             else:
                 raise RenderError(
                     "Gazebo reference is unknown: %s" % reference)
         for sdf_joint in gazebo.findall("joint"):
-            sdf_joint.set(
-                "name", canonical_local_name(sdf_joint.get("name")))
+            sdf_joint.set("name", sdf_joint_map[sdf_joint_sources[sdf_joint]])
             for tag in ("parent", "child"):
                 element = sdf_joint.find(tag)
                 if element is None or element.text is None:
@@ -142,6 +162,136 @@ def transform_robot_tree(root):
                 source = element.text.strip()
                 element.text = _map_required(
                     joint_map, source, "plugin %s" % tag)
+    return root
+
+
+def _require_plugin(root, filename):
+    matches = [
+        plugin for plugin in root.findall(".//plugin")
+        if plugin.get("filename") == filename]
+    if len(matches) != 1:
+        raise RenderError("expected one plugin %s" % filename)
+    return matches[0]
+
+
+def validate_runtime_tree(root):
+    if root.tag != "robot" or root.get("name") != "bunker_aubo":
+        raise RenderError("unexpected runtime robot root")
+    links = root.findall("link")
+    joints = root.findall("joint")
+    link_names = [link.get("name") for link in links]
+    joint_names = [joint.get("name") for joint in joints]
+    if (not links or not joints or len(link_names) != len(set(link_names)) or
+            len(joint_names) != len(set(joint_names))):
+        raise RenderError("runtime declarations are missing or duplicated")
+    if any(not isinstance(name, str) or not name.startswith(FRAME_PREFIX)
+           for name in link_names):
+        raise RenderError("runtime link lacks the ground frame prefix")
+    if any(not isinstance(name, str) or LOCAL_NAME_RE.fullmatch(name) is None
+           for name in joint_names):
+        raise RenderError("runtime joint name is invalid")
+
+    link_set = set(link_names)
+    child_links = set()
+    for joint in joints:
+        parent = joint.find("parent")
+        child = joint.find("child")
+        if (parent is None or child is None or
+                parent.get("link") not in link_set or
+                child.get("link") not in link_set):
+            raise RenderError("runtime joint reference is invalid")
+        child_links.add(child.get("link"))
+    if link_set - child_links != {"ground/base_link"}:
+        raise RenderError("runtime must have one ground/base_link root")
+
+    required_links = {
+        "ground/base_link", "ground/aubo_i5_base_link", "ground/ee_link",
+        "ground/ag95_base_link", "ground/gripper_tcp_link",
+        "ground/d435_link", "ground/d435_color_optical_frame",
+        "ground/d435_depth_optical_frame", "ground/lidar_2d_link",
+    }
+    if not required_links.issubset(link_set):
+        raise RenderError("runtime robot links are incomplete")
+    if not EXPECTED_CONTROLLED_JOINTS.issubset(set(joint_names)):
+        raise RenderError("runtime controlled joints are incomplete")
+
+    transmissions = root.findall("transmission")
+    transmission_joints = {
+        transmission.find("joint").get("name")
+        for transmission in transmissions
+        if transmission.find("joint") is not None
+    }
+    if (len(transmissions) != len(EXPECTED_CONTROLLED_JOINTS) or
+            transmission_joints != EXPECTED_CONTROLLED_JOINTS):
+        raise RenderError("runtime transmissions differ")
+
+    plugins = root.findall(".//plugin")
+    plugin_libraries = {plugin.get("filename") for plugin in plugins}
+    if (len(plugins) != len(EXPECTED_PLUGIN_LIBRARIES) or
+            plugin_libraries != EXPECTED_PLUGIN_LIBRARIES):
+        raise RenderError("runtime plugin set differs")
+    sensors = root.findall(".//sensor")
+    if ({sensor.get("name") for sensor in sensors} != EXPECTED_SENSORS or
+            len(sensors) != len(EXPECTED_SENSORS)):
+        raise RenderError("runtime sensor set differs")
+
+    base = root.find("./link[@name='ground/base_link']")
+    base_collisions = base.findall("collision") if base is not None else []
+    if len(base_collisions) != 1:
+        raise RenderError("runtime base collision differs")
+    base_collision = base_collisions[0]
+    if (base_collision.get("name") != "base_link_collision" or
+            base_collision.find("origin") is None or
+            base_collision.find("origin").get("xyz") != BASE_COLLISION_ORIGIN or
+            base_collision.find("geometry/box") is None or
+            base_collision.find("geometry/box").get("size") !=
+            BASE_COLLISION_SIZE):
+        raise RenderError("runtime base collision differs")
+
+    planar = _require_plugin(root, "libbunker_planar_move_plugin.so")
+    if (
+        planar.findtext("robotNamespace") != "/ground" or
+        planar.findtext("commandTopic") != "cmd_vel_safe" or
+        planar.findtext("odometryTopic") != "odom" or
+        planar.findtext("odometryFrame") != "ground/odom" or
+        planar.findtext("robotBaseFrame") != "ground/base_link"
+    ):
+        raise RenderError("runtime planar interface differs")
+    laser = _require_plugin(root, "libgazebo_ros_laser.so")
+    if (laser.findtext("robotNamespace") != "/ground" or
+            laser.findtext("topicName") != "scan" or
+            laser.findtext("frameName") != "ground/lidar_2d_link"):
+        raise RenderError("runtime laser interface differs")
+    control = _require_plugin(root, "libgazebo_ros_control.so")
+    if (control.findtext("robotNamespace") != "/ground" or
+            control.findtext("robotParam") != "/ground/robot_description"):
+        raise RenderError("runtime control interface differs")
+    color = _require_plugin(root, "libgazebo_ros_camera.so")
+    depth = _require_plugin(root, "libgazebo_ros_openni_kinect.so")
+    if (color.findtext("robotNamespace") != "/ground" or
+            color.findtext("cameraName") != "d435/color" or
+            color.findtext("imageTopicName") != "image_raw" or
+            color.findtext("cameraInfoTopicName") !=
+            "camera_info" or
+            color.findtext("frameName") !=
+            "ground/d435_color_optical_frame" or
+            depth.findtext("robotNamespace") != "/ground" or
+            depth.findtext("cameraName") != "d435/depth" or
+            depth.findtext("depthImageTopicName") !=
+            "image_raw" or
+            depth.findtext("depthImageCameraInfoTopicName") !=
+            "camera_info" or
+            depth.findtext("pointCloudTopicName") != "points" or
+            depth.findtext("frameName") !=
+            "ground/d435_depth_optical_frame"):
+        raise RenderError("runtime D435 interface differs")
+
+    lowered = ET.tostring(root, encoding="unicode").lower()
+    for token in (
+            "brick", "handoff", "attachment", "benchmark", "provenance",
+            "lifecycle"):
+        if token in lowered:
+            raise RenderError("task-specific token in runtime: %s" % token)
     return root
 
 
@@ -185,12 +335,14 @@ def _indent_tree(element, level=0):
         element.tail = prefix
 
 
-def render_ground_robot(path):
+def render_ground_robot(path, validate=True):
     try:
         root = ET.fromstring(_run_xacro(path))
     except ET.ParseError as error:
         raise RenderError("expanded xacro is invalid XML: %s" % error)
     transform_robot_tree(root)
+    if validate:
+        validate_runtime_tree(root)
     _indent_tree(root)
     payload = ET.tostring(
         root, encoding="utf-8", xml_declaration=True,

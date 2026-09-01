@@ -2,11 +2,15 @@
 
 import importlib.util
 import io
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+from unittest import mock
+
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,7 +19,16 @@ PACKAGE_XML = PACKAGE / "package.xml"
 CMAKE = PACKAGE / "CMakeLists.txt"
 SETUP = PACKAGE / "setup.py"
 RENDERER = PACKAGE / "src/ground_manipulator_runtime/renderer.py"
+STARTUP = PACKAGE / "src/ground_manipulator_runtime/startup.py"
 RENDER_SCRIPT = PACKAGE / "scripts/render_ground_robot.py"
+SPAWN_SCRIPT = PACKAGE / "scripts/spawn_ground_robot.py"
+ROBOT_XACRO = PACKAGE / "urdf/ground_robot.urdf.xacro"
+D435_XACRO = PACKAGE / "urdf/d435.xacro"
+CONTROLLERS = PACKAGE / "config/controllers.yaml"
+RUNTIME_LAUNCH = PACKAGE / "launch/ground_robot_runtime.launch"
+STANDALONE_LAUNCH = PACKAGE / "launch/ground_robot_standalone.launch"
+WORLD = PACKAGE / "worlds/ground_robot.world"
+AG95_CMAKE = ROOT / "src/vendor/dh_ag95_description/CMakeLists.txt"
 
 
 def _load_renderer():
@@ -37,7 +50,97 @@ def _load_render_cli():
     return module
 
 
+def _load_startup():
+    spec = importlib.util.spec_from_file_location(
+        "ground_manipulator_startup_test_target", str(STARTUP))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 class GroundManipulatorPlatformTest(unittest.TestCase):
+    def test_startup_accepts_late_model_and_drives_home_with_controllers(self):
+        self.assertTrue(STARTUP.is_file(), "startup module is missing")
+        self.assertTrue(SPAWN_SCRIPT.is_file(), "startup CLI is missing")
+        self.assertTrue(SPAWN_SCRIPT.stat().st_mode & 0o111)
+        startup = _load_startup()
+
+        events = []
+
+        class SpawnAttempt:
+            def __init__(self, result):
+                self.spawn_result = result
+
+            def result(self, timeout):
+                events.append(("spawn_result", timeout))
+                return self.spawn_result
+
+        class Gateway:
+            def __init__(self, spawn_result=False):
+                self.spawn_result = spawn_result
+                self.calls = []
+
+            def begin_spawn(self, model_name, robot_xml, initial_pose):
+                self.calls.append(
+                    ("begin_spawn", model_name, robot_xml, initial_pose))
+                return SpawnAttempt(self.spawn_result)
+
+        gateway = Gateway(spawn_result=False)
+
+        def wait_for_model(model_name, timeout):
+            events.append(("wait", model_name, timeout))
+            return True
+
+        accepted = startup.initialize_ground_robot(
+            gateway, "<robot name='ground'/>", object(), wait_for_model,
+            lambda: events.append(("controllers",)),
+            lambda positions, timeout: events.append(
+                ("home", positions, timeout)) or True,
+            timeout=25.0)
+        self.assertFalse(accepted)
+        self.assertEqual([
+            ("wait", "ground_robot", 25.0),
+            ("controllers",),
+            ("home", startup.HOME_JOINT_POSITIONS, 25.0),
+            ("spawn_result", 25.0),
+        ], events)
+        self.assertEqual("begin_spawn", gateway.calls[0][0])
+        self.assertEqual({
+            "shoulder_pan_joint": 0.0,
+            "shoulder_lift_joint": -0.5,
+            "elbow_joint": 1.0,
+            "wrist_1_joint": 0.0,
+            "wrist_2_joint": 1.0,
+            "wrist_3_joint": 0.0,
+            "left_outer_knuckle_joint": 0.0,
+        }, dict(startup.HOME_JOINT_POSITIONS))
+        stages = startup.arm_home_trajectory(
+            startup.HOME_JOINT_POSITIONS[:-1])
+        self.assertEqual([4.0, 8.0], [duration for duration, _ in stages])
+        self.assertEqual(0.0, dict(stages[0][1])["shoulder_lift_joint"])
+        self.assertEqual(1.0, dict(stages[0][1])["elbow_joint"])
+        self.assertEqual(
+            startup.HOME_JOINT_POSITIONS[:-1], stages[-1][1])
+
+        with self.assertRaises(startup.StartupError):
+            startup.initialize_ground_robot(
+                Gateway(), "<robot/>", object(),
+                lambda _name, _timeout: False, lambda: None,
+                lambda _positions, _timeout: True, timeout=1.0)
+        with self.assertRaises(startup.StartupError):
+            startup.initialize_ground_robot(
+                Gateway(), "<robot/>", object(),
+                lambda _name, _timeout: True, lambda: None,
+                lambda _positions, _timeout: False, timeout=1.0)
+
+    def test_ag95_description_installs_runtime_model_resources(self):
+        self.assertTrue(AG95_CMAKE.is_file())
+        cmake = AG95_CMAKE.read_text(encoding="utf-8")
+        self.assertIn(
+            "install(DIRECTORY launch meshes urdf", cmake)
+        self.assertIn(
+            "DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}", cmake)
+
     def test_package_declares_only_runtime_robot_dependencies(self):
         self.assertTrue(PACKAGE_XML.is_file(), "runtime package is missing")
         root = ET.parse(str(PACKAGE_XML)).getroot()
@@ -49,20 +152,28 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
         }
         self.assertTrue({
             "aubo_description",
+            "actionlib",
+            "actionlib_msgs",
             "bunker_description",
             "bunker_sim_runtime",
-            "bunker_aubo_moveit_config",
             "controller_manager",
+            "control_msgs",
             "dh_ag95_description",
+            "gazebo_msgs",
             "gazebo_plugins",
             "gazebo_ros",
             "gazebo_ros_control",
+            "geometry_msgs",
             "joint_state_controller",
             "position_controllers",
             "robot_state_publisher",
+            "std_msgs",
+            "tf",
             "tf2_ros",
+            "trajectory_msgs",
             "xacro",
         }.issubset(dependencies))
+        self.assertNotIn("bunker_aubo_moveit_config", dependencies)
         manifest = PACKAGE_XML.read_text(encoding="utf-8").lower()
         for token in ("benchmark", "provenance", "pilot", "formal"):
             self.assertNotIn(token, manifest)
@@ -71,6 +182,7 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
         cmake = CMAKE.read_text(encoding="utf-8")
         self.assertIn("catkin_python_setup()", cmake)
         self.assertIn("scripts/render_ground_robot.py", cmake)
+        self.assertIn("scripts/spawn_ground_robot.py", cmake)
         self.assertIn("DIRECTORY config launch urdf worlds", cmake)
         self.assertTrue(SETUP.is_file())
 
@@ -165,7 +277,7 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="ground-render-") as directory:
             path = Path(directory) / "fixture.urdf.xacro"
             path.write_text(source, encoding="utf-8")
-            payload = renderer.render_ground_robot(path)
+            payload = renderer.render_ground_robot(path, validate=False)
         root = ET.fromstring(payload)
         self.assertEqual("ground/base_link", root.find("link").get("name"))
         self.assertEqual("wheel_1_joint", root.find("joint").get("name"))
@@ -189,6 +301,221 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
                 argv=("/definitely/missing/ground.urdf.xacro",),
                 stdout=output, stderr=errors))
         self.assertIn("xacro file is missing", errors.getvalue())
+
+    def test_composite_model_has_only_robot_runtime_plugins(self):
+        self.assertTrue(ROBOT_XACRO.is_file(), "composite xacro is missing")
+        self.assertTrue(D435_XACRO.is_file(), "D435 xacro is missing")
+        renderer = _load_renderer()
+        ros_package_path = os.pathsep.join(
+            (str(ROOT / "src"), "/opt/ros/noetic/share"))
+        with mock.patch.dict(
+                os.environ, {"ROS_PACKAGE_PATH": ros_package_path}):
+            payload = renderer.render_ground_robot(ROBOT_XACRO)
+        root = ET.fromstring(payload)
+
+        links = root.findall("link")
+        joints = root.findall("joint")
+        link_names = {link.get("name") for link in links}
+        joint_names = {joint.get("name") for joint in joints}
+        self.assertTrue({
+            "ground/base_link",
+            "ground/aubo_i5_base_link",
+            "ground/ee_link",
+            "ground/ag95_base_link",
+            "ground/gripper_tcp_link",
+            "ground/d435_link",
+            "ground/d435_color_optical_frame",
+            "ground/d435_depth_optical_frame",
+            "ground/lidar_2d_link",
+        }.issubset(link_names))
+        self.assertTrue({
+            "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+            "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
+            "left_outer_knuckle_joint",
+        }.issubset(joint_names))
+        child_links = {
+            joint.find("child").get("link") for joint in joints
+        }
+        self.assertEqual({"ground/base_link"}, link_names - child_links)
+
+        transmissions = {
+            item.find("joint").get("name")
+            for item in root.findall("transmission")
+        }
+        self.assertEqual({
+            "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+            "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
+            "left_outer_knuckle_joint",
+        }, transmissions)
+
+        plugin_libraries = {
+            plugin.get("filename") for plugin in root.findall(".//plugin")
+        }
+        self.assertEqual({
+            "libbunker_planar_move_plugin.so",
+            "libgazebo_ros_laser.so",
+            "libgazebo_ros_control.so",
+            "libroboticsgroup_gazebo_mimic_joint_plugin.so",
+            "libgazebo_ros_camera.so",
+            "libgazebo_ros_openni_kinect.so",
+        }, plugin_libraries)
+        self.assertEqual(
+            {"bunker_lidar_2d", "ground_d435_color", "ground_d435_depth"},
+            {sensor.get("name") for sensor in root.findall(".//sensor")})
+        color_plugin = root.find(
+            ".//plugin[@name='ground_d435_color_controller']")
+        self.assertEqual("/ground", color_plugin.findtext("robotNamespace"))
+        self.assertEqual("d435/color", color_plugin.findtext("cameraName"))
+        self.assertEqual(
+            "image_raw", color_plugin.findtext("imageTopicName"))
+        self.assertEqual(
+            "camera_info",
+            color_plugin.findtext("cameraInfoTopicName"))
+        depth_plugin = root.find(
+            ".//plugin[@name='ground_d435_depth_controller']")
+        self.assertEqual("/ground", depth_plugin.findtext("robotNamespace"))
+        self.assertEqual("d435/depth", depth_plugin.findtext("cameraName"))
+        self.assertEqual(
+            "image_raw",
+            depth_plugin.findtext("depthImageTopicName"))
+        self.assertEqual(
+            "camera_info",
+            depth_plugin.findtext("depthImageCameraInfoTopicName"))
+        self.assertEqual(
+            "points", depth_plugin.findtext("pointCloudTopicName"))
+        self.assertEqual(
+            renderer.BASE_COLLISION_SIZE,
+            root.find(
+                "./link[@name='ground/base_link']/collision/geometry/box"
+            ).get("size"))
+        base_surface = root.find("./gazebo[@reference='ground/base_link']")
+        self.assertEqual("1.0", base_surface.findtext("mu1"))
+        self.assertEqual("1.0", base_surface.findtext("mu2"))
+
+        lowered = payload.lower()
+        for token in (
+                "brick", "handoff", "attachment", "benchmark",
+                "provenance", "lifecycle"):
+            self.assertNotIn(token, lowered)
+
+    def test_renderer_enforces_the_complete_runtime_tree(self):
+        renderer = _load_renderer()
+        ros_package_path = os.pathsep.join(
+            (str(ROOT / "src"), "/opt/ros/noetic/share"))
+        with mock.patch.dict(
+                os.environ, {"ROS_PACKAGE_PATH": ros_package_path}), \
+                mock.patch.object(
+                    renderer, "validate_runtime_tree",
+                    wraps=renderer.validate_runtime_tree) as validation:
+            payload = renderer.render_ground_robot(ROBOT_XACRO)
+        self.assertEqual(1, validation.call_count)
+
+        root = ET.fromstring(payload)
+        root.append(ET.fromstring(
+            '<gazebo><plugin name="unexpected" filename="bad.so"/></gazebo>'))
+        with self.assertRaises(renderer.RenderError):
+            renderer.validate_runtime_tree(root)
+
+    def test_worldless_launch_owns_ground_interfaces_and_real_controllers(self):
+        for path in (CONTROLLERS, RUNTIME_LAUNCH, STANDALONE_LAUNCH, WORLD):
+            self.assertTrue(path.is_file(), "%s is missing" % path.name)
+
+        controllers = yaml.safe_load(CONTROLLERS.read_text(encoding="utf-8"))
+        self.assertEqual({
+            "joint_state_controller", "arm_controller", "gripper_controller",
+            "gazebo_ros_control",
+        }, set(controllers))
+        self.assertEqual(
+            "joint_state_controller/JointStateController",
+            controllers["joint_state_controller"]["type"])
+        self.assertEqual(
+            "position_controllers/JointTrajectoryController",
+            controllers["arm_controller"]["type"])
+        self.assertEqual([
+            "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+            "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
+        ], controllers["arm_controller"]["joints"])
+        self.assertEqual(
+            ["left_outer_knuckle_joint"],
+            controllers["gripper_controller"]["joints"])
+        self.assertEqual(
+            {"p": 20.0, "i": 1.0, "d": 0.1, "i_clamp": 1.0},
+            controllers["gazebo_ros_control"]["pid_gains"]
+            ["right_outer_knuckle_joint"])
+
+        runtime = ET.parse(str(RUNTIME_LAUNCH)).getroot()
+        self.assertFalse(any(
+            "empty_world.launch" in include.get("file", "")
+            for include in runtime.findall(".//include")))
+        group = runtime.find("group")
+        self.assertIsNotNone(group)
+        self.assertEqual("ground", group.get("ns"))
+        nodes = {node.get("name"): node for node in group.findall("node")}
+        self.assertEqual({
+            "velocity_guard", "spawn_ground_robot", "controller_spawner",
+            "robot_state_publisher", "world_to_odom",
+        }, set(nodes))
+        self.assertEqual(
+            ("bunker_sim_runtime", "velocity_guard.py"),
+            (nodes["velocity_guard"].get("pkg"),
+             nodes["velocity_guard"].get("type")))
+        spawn = nodes["spawn_ground_robot"]
+        self.assertEqual(
+            ("ground_manipulator_runtime", "spawn_ground_robot.py"),
+            (spawn.get("pkg"), spawn.get("type")))
+        self.assertEqual("true", spawn.get("required"))
+        spawn_params = {
+            item.get("name"): item.get("value")
+            for item in spawn.findall("param")
+        }
+        self.assertEqual({
+            "x", "y", "z", "roll", "pitch", "yaw", "model_timeout",
+            "controller_timeout",
+        }, set(spawn_params))
+        self.assertEqual("true", nodes["controller_spawner"].get("required"))
+        self.assertEqual(
+            "--wait-for model_spawned joint_state_controller "
+            "arm_controller gripper_controller",
+            nodes["controller_spawner"].get("args"))
+        self.assertEqual(
+            "0 0 0 0 0 0 1 world ground/odom",
+            nodes["world_to_odom"].get("args"))
+        descriptions = [
+            param for param in group.findall("param")
+            if param.get("name") == "robot_description"]
+        self.assertEqual(1, len(descriptions))
+        self.assertIn(
+            "ground_manipulator_runtime)/scripts/render_ground_robot.py",
+            descriptions[0].get("command"))
+
+        standalone = ET.parse(str(STANDALONE_LAUNCH)).getroot()
+        includes = standalone.findall("include")
+        self.assertEqual(2, len(includes))
+        self.assertEqual(1, sum(
+            include.get("file") ==
+            "$(find gazebo_ros)/launch/empty_world.launch"
+            for include in includes))
+        self.assertEqual(1, sum(
+            include.get("file") ==
+            "$(find ground_manipulator_runtime)/launch/ground_robot_runtime.launch"
+            for include in includes))
+
+        world = ET.parse(str(WORLD)).getroot().find("world")
+        self.assertIsNotNone(world)
+        self.assertIn(
+            "model://ground_plane",
+            [item.findtext("uri") for item in world.findall("include")])
+        obstacle = world.find("./model[@name='ground_scan_obstacle']")
+        self.assertIsNotNone(obstacle)
+        self.assertEqual("2.0 0.0 0.5 0 0 0", obstacle.findtext("pose"))
+
+        runtime_text = "\n".join(
+            path.read_text(encoding="utf-8").lower()
+            for path in (CONTROLLERS, RUNTIME_LAUNCH, STANDALONE_LAUNCH, WORLD))
+        for token in (
+                "brick", "handoff", "attachment", "benchmark",
+                "provenance", "lifecycle"):
+            self.assertNotIn(token, runtime_text)
 
 
 if __name__ == "__main__":

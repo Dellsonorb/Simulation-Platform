@@ -1,0 +1,37 @@
+<launch>
+  <arg name="x" default="0.0"/>
+  <arg name="y" default="0.0"/>
+  <arg name="z" default="0.36"/>
+  <arg name="roll" default="0.0"/>
+  <arg name="pitch" default="0.0"/>
+  <arg name="yaw" default="0.0"/>
+
+  <group ns="ground">
+    <param name="robot_description"
+      command="$(find ground_manipulator_runtime)/scripts/render_ground_robot.py $(find ground_manipulator_runtime)/urdf/ground_robot.urdf.xacro"/>
+    <rosparam command="load"
+      file="$(find ground_manipulator_runtime)/config/controllers.yaml"/>
+
+    <node pkg="bunker_sim_runtime" type="velocity_guard.py"
+      name="velocity_guard" required="true" output="screen"/>
+    <node pkg="ground_manipulator_runtime" type="spawn_ground_robot.py"
+      name="spawn_ground_robot" required="true" output="screen">
+      <param name="x" value="$(arg x)"/>
+      <param name="y" value="$(arg y)"/>
+      <param name="z" value="$(arg z)"/>
+      <param name="roll" value="$(arg roll)"/>
+      <param name="pitch" value="$(arg pitch)"/>
+      <param name="yaw" value="$(arg yaw)"/>
+      <param name="model_timeout" value="30.0"/>
+      <param name="controller_timeout" value="30.0"/>
+    </node>
+    <node pkg="controller_manager" type="spawner"
+      name="controller_spawner" required="true" output="screen"
+      args="--wait-for model_spawned joint_state_controller arm_controller gripper_controller"/>
+    <node pkg="robot_state_publisher" type="robot_state_publisher"
+      name="robot_state_publisher" required="true" output="screen"/>
+    <node pkg="tf2_ros" type="static_transform_publisher"
+      name="world_to_odom" required="true"
+      args="0 0 0 0 0 0 1 world ground/odom"/>
+  </group>
+</launch>
