@@ -6,7 +6,7 @@
 
 **Architecture:** Add only one new message package and one thin P450 facade package. Keep native Prometheus state topics public, place `move_base` above the BUNKER `/cmd_vel + odom + BunkerStatus` boundary, isolate Gazebo-only localization/contact/vehicle behavior in SIM packages, and expose `map` rather than `world` to common runtime and task code.
 
-**Tech Stack:** ROS 1 Noetic, catkin, Python 3/rospy/actionlib/tf2, C++ Gazebo ModelPlugin, Prometheus/PX4 SITL/MAVROS, move_base, MoveIt, pytest/rostest.
+**Tech Stack:** ROS 1 Noetic, catkin, Python 3/rospy/actionlib/tf2, C++ Gazebo ModelPlugin, Prometheus/PX4 SITL/MAVROS, move_base, MoveIt, unittest/rostest.
 
 ---
 
@@ -51,7 +51,7 @@ Add assertions that:
 Run:
 
 ```bash
-python3 -m pytest -q tests/test_sim_to_real_interface_contract.py
+/usr/bin/python3 -m unittest -q tests.test_sim_to_real_interface_contract
 ```
 
 Expected: FAIL because both packages are absent.
@@ -65,7 +65,7 @@ Create the action exactly as frozen in the design. Vendor the official message-o
 Run:
 
 ```bash
-python3 -m pytest -q tests/test_sim_to_real_interface_contract.py
+/usr/bin/python3 -m unittest -q tests.test_sim_to_real_interface_contract
 ./scripts/with_noetic_env.bash catkin_make
 ```
 
@@ -110,7 +110,8 @@ Add structural assertions that the facade imports `prometheus_msgs`, not `mavros
 Run:
 
 ```bash
-python3 -m pytest -q src/platform/p450_flight_facade/test/test_translation.py tests/test_sim_to_real_interface_contract.py
+/usr/bin/python3 src/platform/p450_flight_facade/test/test_translation.py -q
+/usr/bin/python3 -m unittest -q tests.test_sim_to_real_interface_contract
 ```
 
 Expected: FAIL because the package and translator do not exist.
@@ -134,7 +135,8 @@ Keep caller/task deadlines outside the facade. Expose tolerances and state-fresh
 Run:
 
 ```bash
-python3 -m pytest -q src/platform/p450_flight_facade/test/test_translation.py tests/test_sim_to_real_interface_contract.py
+/usr/bin/python3 src/platform/p450_flight_facade/test/test_translation.py -q
+/usr/bin/python3 -m unittest -q tests.test_sim_to_real_interface_contract
 ./scripts/with_p450_env.bash catkin_make
 ```
 
@@ -181,7 +183,9 @@ Require Prometheus to own `uav1/odom -> uav1/base_link` and the BUNKER adapter t
 Run:
 
 ```bash
-python3 -m pytest -q tests/test_air_ground_platform.py src/platform/sim_platform_bringup/test/test_p450_launch_contract.py src/platform/bunker_sim_runtime/test/test_launch_contract.py
+/usr/bin/python3 -m unittest -q tests.test_air_ground_platform
+/usr/bin/python3 src/platform/sim_platform_bringup/test/test_p450_launch_contract.py -q
+/usr/bin/python3 src/platform/bunker_sim_runtime/test/test_launch_contract.py -q
 ```
 
 Expected: FAIL on existing `world -> */odom` runtime authorities and old P450 parent frame.
@@ -237,7 +241,9 @@ Require:
 Run:
 
 ```bash
-python3 -m pytest -q src/platform/bunker_sim_runtime/test/test_velocity_guard.py src/platform/bunker_sim_runtime/test/test_renderer.py tests/test_bunker_build_contract.py tests/test_bunker_simple_smoke.py
+/usr/bin/python3 src/platform/bunker_sim_runtime/test/test_velocity_guard.py -q
+/usr/bin/python3 src/platform/bunker_sim_runtime/test/test_renderer.py -q
+/usr/bin/python3 -m unittest -q tests.test_bunker_build_contract tests.test_bunker_simple_smoke
 ```
 
 Expected: FAIL on old `cmd_vel_safe`, world-pose odometry, and missing status.
@@ -311,7 +317,8 @@ Run the focused tests. Expected failures: Prometheus custom MID360 type, active 
 Run:
 
 ```bash
-python3 -m pytest -q tests/test_mid360_runtime_contract.py tests/test_p450_runtime_contract.py src/platform/bunker_sim_runtime/test/test_renderer.py tests/test_ground_manipulator_platform.py
+/usr/bin/python3 -m unittest -q tests.test_mid360_runtime_contract tests.test_p450_runtime_contract tests.test_ground_manipulator_platform
+/usr/bin/python3 src/platform/bunker_sim_runtime/test/test_renderer.py -q
 ./scripts/with_p450_env.bash catkin_make
 ```
 
@@ -357,7 +364,8 @@ Require:
 Run:
 
 ```bash
-python3 -m pytest -q src/ground/bunker_navigation/test/test_common_navigation.py src/ground/bunker_navigation/test/test_configuration.py
+/usr/bin/python3 src/ground/bunker_navigation/test/test_common_navigation.py -q
+/usr/bin/python3 src/ground/bunker_navigation/test/test_configuration.py -q
 ```
 
 Expected: FAIL because common launch/stop helper are absent and frames/topics are legacy values.
@@ -448,7 +456,9 @@ Require:
 Run:
 
 ```bash
-python3 -m pytest -q src/demos/air_ground_pick_demo/test/test_approach.py src/demos/air_ground_pick_demo/test/test_orchestrator_contract.py tests/test_air_ground_pick_demo.py
+/usr/bin/python3 src/demos/air_ground_pick_demo/test/test_approach.py -q
+/usr/bin/python3 src/demos/air_ground_pick_demo/test/test_orchestrator_contract.py -q
+/usr/bin/python3 -m unittest -q tests.test_air_ground_pick_demo
 ```
 
 Expected: FAIL on current direct Prometheus, Twist, contacts, and `world` dependencies.
@@ -466,8 +476,10 @@ Expected: FAIL on current direct Prometheus, Twist, contacts, and `world` depend
 Run focused tests, then the complete fast suite:
 
 ```bash
-python3 -m pytest -q src/demos/air_ground_pick_demo/test tests/test_air_ground_pick_demo.py
-python3 -m pytest -q tests src/platform/*/test src/ground/*/test src/demos/*/test
+/usr/bin/python3 src/demos/air_ground_pick_demo/test/test_approach.py -q
+/usr/bin/python3 src/demos/air_ground_pick_demo/test/test_orchestrator_contract.py -q
+/usr/bin/python3 -m unittest -q tests.test_air_ground_pick_demo
+/usr/bin/python3 -m unittest -q tests.test_air_ground_pick_demo tests.test_air_ground_platform tests.test_bunker_build_contract tests.test_bunker_shell_contract tests.test_bunker_simple_smoke tests.test_ground_manipulator_platform tests.test_mid360_runtime_contract tests.test_p450_build_contract tests.test_p450_runtime_contract tests.test_realsense_runtime_safety
 ```
 
 Expected: all unit and static contract tests pass.
@@ -517,7 +529,7 @@ Run:
 
 ```bash
 ./scripts/build_p450_runtime_overlays.bash
-python3 -m pytest -q tests src/platform/*/test src/ground/*/test src/demos/*/test
+/usr/bin/python3 -m unittest -q tests.test_air_ground_pick_demo tests.test_air_ground_platform tests.test_bunker_build_contract tests.test_bunker_shell_contract tests.test_bunker_simple_smoke tests.test_ground_manipulator_platform tests.test_mid360_runtime_contract tests.test_p450_build_contract tests.test_p450_runtime_contract tests.test_realsense_runtime_safety tests.test_sim_to_real_interface_contract
 ```
 
 Expected: builds and tests pass.
@@ -578,7 +590,7 @@ Run:
 
 ```bash
 git status --short
-python3 -m pytest -q tests src/platform/*/test src/ground/*/test src/demos/*/test
+/usr/bin/python3 -m unittest -q tests.test_air_ground_pick_demo tests.test_air_ground_platform tests.test_bunker_build_contract tests.test_bunker_shell_contract tests.test_bunker_simple_smoke tests.test_ground_manipulator_platform tests.test_mid360_runtime_contract tests.test_p450_build_contract tests.test_p450_runtime_contract tests.test_realsense_runtime_safety tests.test_sim_to_real_interface_contract
 ```
 
 Expected: tests pass; only intended source/doc changes or ignored log artifacts exist.
