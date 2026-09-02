@@ -22,7 +22,6 @@ EXPECTED_NODES = {
     "spawn_bunker": ("gazebo_ros", "spawn_model"),
     "robot_state_publisher": (
         "robot_state_publisher", "robot_state_publisher"),
-    "world_to_odom": ("tf2_ros", "static_transform_publisher"),
 }
 EXPECTED_SPAWN_ARGS = (
     "-urdf -param robot_description -model bunker "
@@ -80,24 +79,24 @@ class LaunchContractTest(unittest.TestCase):
         self.assertEqual(
             {"name", "command"}, set(parameters["robot_description"].attrib))
 
-    def test_runtime_has_only_the_four_owned_nodes(self):
+    def test_runtime_has_only_robot_owned_nodes_and_no_global_anchor(self):
         group = _parse(RUNTIME_LAUNCH).find("group")
         nodes = {item.get("name"): item for item in group.findall("node")}
         self.assertEqual(EXPECTED_NODES, {
             name: (item.get("pkg"), item.get("type"))
             for name, item in nodes.items()
         })
-        self.assertEqual(4, len(nodes))
+        self.assertEqual(3, len(nodes))
         self.assertEqual("true", nodes["velocity_guard"].get("required"))
         self.assertIsNone(nodes["spawn_bunker"].get("required"))
         self.assertEqual("screen", nodes["velocity_guard"].get("output"))
         self.assertEqual("screen", nodes["spawn_bunker"].get("output"))
         self.assertEqual([], nodes["robot_state_publisher"].findall("param"))
         self.assertEqual([], list(nodes["robot_state_publisher"]))
-        self.assertEqual(
-            "0 0 0 0 0 0 1 world ground/odom",
-            nodes["world_to_odom"].get("args"),
-        )
+        self.assertEqual([], [
+            node for node in nodes.values()
+            if node.get("pkg") == "tf2_ros"
+        ])
 
     def test_spawn_prefix_and_one_shot_command_are_exact(self):
         spawn = next(
@@ -113,10 +112,16 @@ class LaunchContractTest(unittest.TestCase):
             item.get("type") == "spawn_model"
             for item in _parse(RUNTIME_LAUNCH).iter("node")))
 
-    def test_standalone_wrapper_has_only_gui_and_two_exact_includes(self):
+    def test_standalone_wrapper_owns_sim_localization_and_two_includes(self):
         root = _parse(STANDALONE_LAUNCH)
         self.assertEqual(STANDALONE_ARGS, _direct_arguments(root))
-        self.assertEqual([], root.findall("node"))
+        nodes = {node.get("name"): node for node in root.findall("node")}
+        self.assertEqual({"sim_world_to_map", "sim_localization_ground"},
+                         set(nodes))
+        self.assertEqual("0 0 0 0 0 0 1 world map",
+                         nodes["sim_world_to_map"].get("args"))
+        self.assertEqual("0 0 0 0 0 0 map ground/odom",
+                         nodes["sim_localization_ground"].get("args"))
         includes = root.findall("include")
         self.assertEqual(2, len(includes))
         gazebo = next(
