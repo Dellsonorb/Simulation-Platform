@@ -576,7 +576,7 @@ class Mid360TfContractTest(unittest.TestCase):
             EXPECTED_LIDAR_QUATERNION)
         self.assertEqual({
             "name": "/uav1/livox/lidar",
-            "type": "prometheus_msgs/LivoxCustomMsg",
+            "type": "sensor_msgs/PointCloud2",
         }, self.contract["topic"])
         self.assertEqual({
             "translation_m": 1.0e-6,
@@ -773,6 +773,12 @@ class ImportedSensorEvidenceTest(unittest.TestCase):
         for token in forbidden:
             self.assertNotIn(token, active)
 
+    def test_active_vehicle_models_do_not_publish_gazebo_ground_truth(self):
+        for model in (JINJA_MODEL, MID360_JINJA_MODEL):
+            source = _read(model)
+            self.assertNotIn("/prometheus/ground_truth", source)
+            self.assertNotIn("libgazebo_ros_p3d.so", source)
+
     def test_mid360_jinja_freezes_mount_ray_and_message_contract(self):
         root = ET.fromstring(_read(MID360_JINJA_MODEL))
         model = root.find("./model")
@@ -796,7 +802,7 @@ class ImportedSensorEvidenceTest(unittest.TestCase):
              if item.get("filename") == "liblivox_laser_gazebo_plugins.so"],
             "Livox Gazebo plugin")
         self.assertEqual("10000", plugin.findtext("samples"))
-        self.assertEqual("3", plugin.findtext("publish_pointcloud_type"))
+        self.assertEqual("2", plugin.findtext("publish_pointcloud_type"))
         self.assertEqual(
             "/uav{{ mavlink_id }}/livox/lidar",
             plugin.findtext("ros_topic"))
@@ -854,7 +860,8 @@ class PackageAndSmokeContractTest(unittest.TestCase):
             r'p450_mid360_topic_evidence',
             source, flags=re.DOTALL))
         self.assertIn("/uav1/livox/lidar", source)
-        self.assertIn("prometheus_msgs/LivoxCustomMsg", source)
+        self.assertIn("sensor_msgs/PointCloud2", source)
+        self.assertNotIn("prometheus_msgs/LivoxCustomMsg", source)
         self.assertIn("uav1/lidar_link", source)
         self.assertIn("liblivox_laser_gazebo_plugins.so", source)
         self.assertIn("libprotobuf", source)
@@ -1013,12 +1020,13 @@ class PackageAndSmokeContractTest(unittest.TestCase):
             }
             topic = {
                 "topic": "/uav1/livox/lidar",
-                "type": "prometheus_msgs/LivoxCustomMsg",
+                "type": "sensor_msgs/PointCloud2",
                 "publishers": ["/gazebo"],
                 "samples": [
                     {"stamp": {"secs": 1, "nsecs": value},
-                     "frame_id": "uav1/lidar_link", "point_num": 1,
-                     "points": [{"x": float(value)}]}
+                     "frame_id": "uav1/lidar_link", "width": 1,
+                     "height": 1, "point_step": 32, "row_step": 32,
+                     "data_size": 32}
                     for value in (10, 20, 30)
                 ],
             }

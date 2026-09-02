@@ -59,6 +59,29 @@ LIDAR_GAZEBO_XML = """<gazebo reference="lidar_2d_link">
     </plugin>
   </sensor>
 </gazebo>"""
+IMU_JOINT_XML = """<joint name="imu_joint" type="fixed">
+  <origin xyz="0 0 0" rpy="0 0 0" />
+  <parent link="base_link" />
+  <child link="imu_link" />
+</joint>"""
+IMU_GAZEBO_XML = """<gazebo reference="imu_link">
+  <sensor name="bunker_imu" type="imu">
+    <always_on>true</always_on>
+    <update_rate>100.0</update_rate>
+    <visualize>false</visualize>
+    <plugin name="bunker_imu" filename="libgazebo_ros_imu_sensor.so">
+      <robotNamespace>/ground</robotNamespace>
+      <topicName>imu/data</topicName>
+      <bodyName>imu_link</bodyName>
+      <updateRateHZ>100.0</updateRateHZ>
+      <gaussianNoise>0.002</gaussianNoise>
+      <xyzOffset>0 0 0</xyzOffset>
+      <rpyOffset>0 0 0</rpyOffset>
+      <frameName>imu_link</frameName>
+      <initialOrientationAsReference>false</initialOrientationAsReference>
+    </plugin>
+  </sensor>
+</gazebo>"""
 PLANAR_GAZEBO_XML = """<gazebo>
   <plugin name="bunker_planar_move" filename="libbunker_planar_move_plugin.so">
     <robotNamespace>/ground</robotNamespace>
@@ -247,6 +270,16 @@ def add_lidar(root):
     return root
 
 
+def add_imu(root):
+    if any(element.get("name") in {"imu_link", "imu_joint"}
+           for element in root.findall("link") + root.findall("joint")):
+        raise RenderContractError("IMU entity already exists")
+    root.append(ET.Element("link", {"name": "imu_link"}))
+    root.append(ET.fromstring(IMU_JOINT_XML))
+    root.append(ET.fromstring(IMU_GAZEBO_XML))
+    return root
+
+
 def add_planar_plugin(root):
     if root.find(".//plugin[@name='bunker_laser']") is None:
         raise RenderContractError("laser plugin is missing")
@@ -315,6 +348,9 @@ def validate_runtime_tree(root):
         (joint for joint in joints
          if joint.get("name") == "lidar_2d_joint"), None)
     _require_signature(lidar_joint, LIDAR_JOINT_XML, "LiDAR joint")
+    imu_joint = next(
+        (joint for joint in joints if joint.get("name") == "imu_joint"), None)
+    _require_signature(imu_joint, IMU_JOINT_XML, "IMU joint")
     gazebos = root.findall("gazebo")
     base_gazebo = next(
         (gazebo for gazebo in gazebos
@@ -322,14 +358,19 @@ def validate_runtime_tree(root):
     lidar_gazebo = next(
         (gazebo for gazebo in gazebos
          if gazebo.get("reference") == "lidar_2d_link"), None)
+    imu_gazebo = next(
+        (gazebo for gazebo in gazebos
+         if gazebo.get("reference") == "imu_link"), None)
     planar_gazebo = next(
         (gazebo for gazebo in gazebos if not gazebo.attrib), None)
     _require_signature(lidar_gazebo, LIDAR_GAZEBO_XML, "LiDAR Gazebo")
+    _require_signature(imu_gazebo, IMU_GAZEBO_XML, "IMU Gazebo")
     _require_signature(base_gazebo, BASE_FRICTION_XML, "base friction Gazebo")
     _require_signature(planar_gazebo, PLANAR_GAZEBO_XML, "planar Gazebo")
     if {plugin.get("name"): plugin.get("filename") for plugin in plugins} != {
             "bunker_planar_move": "libbunker_planar_move_plugin.so",
-            "bunker_laser": "libgazebo_ros_laser.so"}:
+            "bunker_laser": "libgazebo_ros_laser.so",
+            "bunker_imu": "libgazebo_ros_imu_sensor.so"}:
         raise RenderContractError("runtime plugin library set differs")
     if root.findall(".//publishTF") or root.findall(".//tf_prefix"):
         raise RenderContractError("unsupported TF plugin tag")
@@ -364,6 +405,7 @@ def render_runtime_urdf(source_path):
     replace_collisions(root)
     add_base_friction(root)
     add_lidar(root)
+    add_imu(root)
     add_planar_plugin(root)
     validate_runtime_tree(root)
     _indent_tree(root)

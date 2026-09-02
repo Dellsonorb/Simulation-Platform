@@ -28,9 +28,11 @@ EXPECTED_PLUGIN_LIBRARIES = {
     "libroboticsgroup_gazebo_mimic_joint_plugin.so",
     "libgazebo_ros_camera.so",
     "libgazebo_ros_openni_kinect.so",
+    "libgazebo_ros_imu_sensor.so",
 }
 EXPECTED_SENSORS = {
-    "bunker_lidar_2d", "ground_d435_color", "ground_d435_depth",
+    "bunker_lidar_2d", "bunker_imu", "ground_d435_color",
+    "ground_d435_depth",
 }
 
 

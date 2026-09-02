@@ -34,6 +34,7 @@ AIR_TF_FRAMES = (
 GROUND_TF_FRAMES = (
     "ground/base_link",
     "ground/lidar_2d_link",
+    "ground/imu_link",
     "ground/aubo_i5_base_link",
     "ground/ee_link",
     "ground/d435_color_optical_frame",
@@ -286,6 +287,7 @@ def run_checks(timeout):
         import check_ground_manipulator_runtime as ground
         import rospy
         import tf2_ros
+        from bunker_msgs.msg import BunkerStatus
         from controller_manager_msgs.srv import ListControllers
         from gazebo_msgs.msg import ModelStates
         from geometry_msgs.msg import Twist
@@ -325,6 +327,9 @@ def run_checks(timeout):
         "scan": ground.check_ground_scan(
             rospy, LaserScan, timeout,
             forward_range_bounds=GROUND_SCAN_FORWARD_RANGE_M),
+        "imu": bunker.check_imu(rospy, Imu, timeout),
+        "bunker_status": bunker.check_status(
+            rospy, BunkerStatus, timeout),
         "tf": check_ground_tf(rospy, tf2_ros, timeout),
         "motion": bunker.check_motion(
             rospy, Odometry, Twist, timeout),

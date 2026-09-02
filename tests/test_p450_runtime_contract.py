@@ -477,18 +477,18 @@ class P450SensorProfileSmokeContractTest(unittest.TestCase):
     def test_mid360_topic_fixture_enforces_type_publisher_and_samples(self):
         valid = {
             "topic": "/uav1/livox/lidar",
-            "type": "prometheus_msgs/LivoxCustomMsg",
+            "type": "sensor_msgs/PointCloud2",
             "publishers": ["/gazebo"],
             "samples": [
                 {"stamp": {"secs": 1, "nsecs": 10},
-                 "frame_id": "uav1/lidar_link", "point_num": 2,
-                 "points": [{"x": 1.0}, {"x": 2.0}]},
+                 "frame_id": "uav1/lidar_link", "width": 2, "height": 1,
+                 "point_step": 32, "row_step": 64, "data_size": 64},
                 {"stamp": {"secs": 1, "nsecs": 20},
-                 "frame_id": "uav1/lidar_link", "point_num": 1,
-                 "points": [{"x": 3.0}]},
+                 "frame_id": "uav1/lidar_link", "width": 1, "height": 1,
+                 "point_step": 32, "row_step": 32, "data_size": 32},
                 {"stamp": {"secs": 2, "nsecs": 0},
-                 "frame_id": "uav1/lidar_link", "point_num": 1,
-                 "points": [{"x": 4.0}]},
+                 "frame_id": "uav1/lidar_link", "width": 1, "height": 1,
+                 "point_step": 32, "row_step": 32, "data_size": 32},
             ],
         }
         with tempfile.TemporaryDirectory() as temporary:
@@ -507,8 +507,8 @@ class P450SensorProfileSmokeContractTest(unittest.TestCase):
                     stamp={"secs": 0, "nsecs": 0})),
                 ("non-increasing", lambda value: value["samples"][1].update(
                     stamp={"secs": 1, "nsecs": 10})),
-                ("point mismatch", lambda value: value["samples"][2].update(
-                    point_num=2)),
+                ("data mismatch", lambda value: value["samples"][2].update(
+                    data_size=31)),
                 ("too few", lambda value: value.update(
                     samples=value["samples"][:2])),
             )

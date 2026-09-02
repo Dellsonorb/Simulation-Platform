@@ -37,6 +37,69 @@ def stamp_advanced(first, second):
     return math.isfinite(first) and math.isfinite(second) and second > first
 
 
+def current_header_summary(message, expected_frame, now):
+    stamp = message.header.stamp.to_sec()
+    frame = message.header.frame_id.lstrip("/")
+    age = now - stamp
+    if not math.isfinite(stamp) or stamp <= 0.0:
+        raise RuntimeCheckError("message timestamp is invalid")
+    if frame != expected_frame:
+        raise RuntimeCheckError(
+            "message frame is %s, expected %s" %
+            (message.header.frame_id, expected_frame))
+    if not math.isfinite(age) or age < -0.1 or age > 1.0:
+        raise RuntimeCheckError(
+            "message is stale: stamp=%.6f now=%.6f age=%.3fs" %
+            (stamp, now, age))
+    return {"frame": frame, "stamp": stamp, "age_s": age}
+
+
+def imu_summary(message, now):
+    summary = current_header_summary(message, "ground/imu_link", now)
+    orientation = message.orientation
+    angular = message.angular_velocity
+    acceleration = message.linear_acceleration
+    values = (
+        orientation.x, orientation.y, orientation.z, orientation.w,
+        angular.x, angular.y, angular.z,
+        acceleration.x, acceleration.y, acceleration.z,
+    )
+    if not all(math.isfinite(float(value)) for value in values):
+        raise RuntimeCheckError("/ground/imu/data contains non-finite values")
+    quaternion_norm = math.sqrt(sum(
+        float(value) ** 2 for value in values[:4]))
+    if abs(quaternion_norm - 1.0) > 1e-3:
+        raise RuntimeCheckError("/ground/imu/data quaternion is invalid")
+    summary.update({
+        "angular_velocity_radps": [
+            float(angular.x), float(angular.y), float(angular.z)],
+        "linear_acceleration_mps2": [
+            float(acceleration.x), float(acceleration.y),
+            float(acceleration.z)],
+    })
+    return summary
+
+
+def bunker_status_summary(message, now):
+    summary = current_header_summary(message, "ground/base_link", now)
+    values = (
+        message.linear_velocity, message.angular_velocity,
+        message.battery_voltage,
+    )
+    if not all(math.isfinite(float(value)) for value in values):
+        raise RuntimeCheckError(
+            "/ground/bunker_status contains non-finite values")
+    summary.update({
+        "linear_velocity_mps": float(message.linear_velocity),
+        "angular_velocity_radps": float(message.angular_velocity),
+        "base_state": int(message.base_state),
+        "control_mode": int(message.control_mode),
+        "fault_code": int(message.fault_code),
+        "battery_voltage": float(message.battery_voltage),
+    })
+    return summary
+
+
 def pose_from_odometry(message):
     position = message.pose.pose.position
     orientation = message.pose.pose.orientation
@@ -115,12 +178,45 @@ def check_scan(rospy, laser_scan_type, timeout):
     }
 
 
+def check_advancing_topic(
+        rospy, topic, message_type, validator, timeout):
+    first = wait_for_message(rospy, topic, message_type, timeout)
+    first_stamp = first.header.stamp.to_sec()
+    deadline = time.monotonic() + timeout
+    last_error = None
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        second = wait_for_message(rospy, topic, message_type, remaining)
+        if not stamp_advanced(
+                first_stamp, second.header.stamp.to_sec()):
+            continue
+        try:
+            return validator(second, rospy.Time.now().to_sec())
+        except RuntimeCheckError as error:
+            last_error = error
+    detail = "" if last_error is None else ": %s" % last_error
+    raise RuntimeCheckError(
+        "%s did not produce current advancing data%s" % (topic, detail))
+
+
+def check_imu(rospy, imu_type, timeout):
+    return check_advancing_topic(
+        rospy, "/ground/imu/data", imu_type, imu_summary, timeout)
+
+
+def check_status(rospy, status_type, timeout):
+    return check_advancing_topic(
+        rospy, "/ground/bunker_status", status_type,
+        bunker_status_summary, timeout)
+
+
 def check_tf(rospy, tf2_ros, timeout):
     buffer = tf2_ros.Buffer()
     listener = tf2_ros.TransformListener(buffer)
     pairs = (
-        ("world", "ground/base_link"),
+        ("map", "ground/base_link"),
         ("ground/base_link", "ground/lidar_2d_link"),
+        ("ground/base_link", "ground/imu_link"),
     )
     observed = []
     for target, source in pairs:
@@ -203,10 +299,11 @@ def run_checks(timeout):
     try:
         import rospy
         import tf2_ros
+        from bunker_msgs.msg import BunkerStatus
         from gazebo_msgs.msg import ModelStates
         from geometry_msgs.msg import Twist
         from nav_msgs.msg import Odometry
-        from sensor_msgs.msg import LaserScan
+        from sensor_msgs.msg import Imu, LaserScan
     except ImportError as error:
         raise RuntimeCheckError("ROS Python environment is incomplete: %s" % error)
 
@@ -220,6 +317,8 @@ def run_checks(timeout):
     return {
         "model": check_model(rospy, ModelStates, timeout),
         "scan": check_scan(rospy, LaserScan, timeout),
+        "imu": check_imu(rospy, Imu, timeout),
+        "status": check_status(rospy, BunkerStatus, timeout),
         "tf": check_tf(rospy, tf2_ros, timeout),
         "motion": check_motion(rospy, Odometry, Twist, timeout),
     }

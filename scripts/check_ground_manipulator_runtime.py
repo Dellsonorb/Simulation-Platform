@@ -38,6 +38,7 @@ REQUIRED_CONTROLLERS = (
 GROUND_TF_FRAMES = (
     "ground/base_link",
     "ground/lidar_2d_link",
+    "ground/imu_link",
     "ground/aubo_i5_base_link",
     "ground/ee_link",
     "ground/d435_color_optical_frame",
@@ -502,6 +503,7 @@ def run_checks(timeout):
         import rospy
         import tf2_ros
         from actionlib_msgs.msg import GoalStatus
+        from bunker_msgs.msg import BunkerStatus
         from control_msgs.msg import (
             FollowJointTrajectoryAction, FollowJointTrajectoryGoal)
         from controller_manager_msgs.srv import ListControllers
@@ -510,7 +512,7 @@ def run_checks(timeout):
         from moveit_msgs.msg import RobotState
         from nav_msgs.msg import Odometry
         from sensor_msgs.msg import (
-            CameraInfo, Image, JointState, LaserScan, PointCloud2)
+            CameraInfo, Image, Imu, JointState, LaserScan, PointCloud2)
         from std_msgs.msg import Bool
         from trajectory_msgs.msg import JointTrajectoryPoint
     except ImportError as error:
@@ -538,6 +540,9 @@ def run_checks(timeout):
     checks["d435"] = check_sensors(
         rospy, Image, CameraInfo, PointCloud2, timeout)
     checks["lidar"] = check_ground_scan(rospy, LaserScan, timeout)
+    checks["imu"] = bunker.check_imu(rospy, Imu, timeout)
+    checks["bunker_status"] = bunker.check_status(
+        rospy, BunkerStatus, timeout)
     checks["tf"] = air_ground.check_current_tf_frames(
         rospy, tf2_ros, GROUND_TF_FRAMES, timeout)
     checks["controller_motion"] = check_controller_motion(

@@ -70,7 +70,8 @@ class RendererTest(unittest.TestCase):
         plugins = {plugin.get("name"): plugin
                    for plugin in root.findall(".//plugin")}
         self.assertEqual(
-            {"bunker_laser", "bunker_planar_move"}, set(plugins))
+            {"bunker_imu", "bunker_laser", "bunker_planar_move"},
+            set(plugins))
         self.assertEqual(
             "libbunker_planar_move_plugin.so",
             plugins["bunker_planar_move"].get("filename"))
@@ -89,7 +90,19 @@ class RendererTest(unittest.TestCase):
             "topicName"))
         self.assertEqual("lidar_2d_link", plugins["bunker_laser"].findtext(
             "frameName"))
+        self.assertEqual(
+            "libgazebo_ros_imu_sensor.so",
+            plugins["bunker_imu"].get("filename"))
+        self.assertEqual("imu/data", plugins["bunker_imu"].findtext(
+            "topicName"))
+        self.assertEqual("imu_link", plugins["bunker_imu"].findtext(
+            "frameName"))
+        self.assertIsNotNone(root.find("./link[@name='imu_link']"))
+        self.assertIsNotNone(root.find("./joint[@name='imu_joint']"))
         self.assertEqual("720", root.findtext(".//sensor/ray/scan/horizontal/samples"))
+        self.assertEqual(
+            {"bunker_lidar_2d", "bunker_imu"},
+            {sensor.get("name") for sensor in root.findall(".//sensor")})
         self.assertNotIn(str(SOURCE_ROOT), payload)
 
     def test_source_can_gain_a_fixed_camera_mount(self):

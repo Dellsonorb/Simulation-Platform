@@ -270,8 +270,10 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
         self.assertIn("ground/gripper_tcp_link", checker.GROUND_TF_FRAMES)
         self.assertIn(
             "ground/d435_depth_optical_frame", checker.GROUND_TF_FRAMES)
+        self.assertIn("ground/imu_link", checker.GROUND_TF_FRAMES)
         for text in (
                 "/ground/runtime_ready", "/ground/d435/depth/points",
+                "bunker.check_imu", "bunker.check_status",
                 "follow_joint_trajectory", "movegroupcommander",
                 "bunker.check_motion"):
             self.assertIn(text, source)
@@ -675,6 +677,7 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
             "ground/d435_color_optical_frame",
             "ground/d435_depth_optical_frame",
             "ground/lidar_2d_link",
+            "ground/imu_link",
         }.issubset(link_names))
         self.assertTrue({
             "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
@@ -706,12 +709,14 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
             "libroboticsgroup_gazebo_mimic_joint_plugin.so",
             "libgazebo_ros_camera.so",
             "libgazebo_ros_openni_kinect.so",
+            "libgazebo_ros_imu_sensor.so",
         }, plugin_libraries)
         planar = root.find(".//plugin[@name='bunker_planar_move']")
         self.assertEqual("cmd_vel", planar.findtext("commandTopic"))
         self.assertEqual("bunker_status", planar.findtext("statusTopic"))
         self.assertEqual(
-            {"bunker_lidar_2d", "ground_d435_color", "ground_d435_depth"},
+            {"bunker_lidar_2d", "bunker_imu", "ground_d435_color",
+             "ground_d435_depth"},
             {sensor.get("name") for sensor in root.findall(".//sensor")})
         camera_sensor_poses = {
             sensor.get("name"): sensor.findtext("pose")

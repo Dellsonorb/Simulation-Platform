@@ -65,6 +65,56 @@ class BunkerSimpleSmokeTest(unittest.TestCase):
         self.assertFalse(checker.stamp_advanced(12.0, 12.0))
         self.assertFalse(checker.stamp_advanced(12.0, 11.99))
 
+    def test_imu_summary_requires_current_finite_ground_frame_data(self):
+        checker = load_checker()
+        message = SimpleNamespace(
+            header=SimpleNamespace(
+                stamp=SimpleNamespace(to_sec=lambda: 9.8),
+                frame_id="ground/imu_link"),
+            orientation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0),
+            angular_velocity=SimpleNamespace(x=0.0, y=0.0, z=0.1),
+            linear_acceleration=SimpleNamespace(x=0.0, y=0.0, z=9.81),
+        )
+        summary = checker.imu_summary(message, now=10.0)
+        self.assertEqual("ground/imu_link", summary["frame"])
+        self.assertAlmostEqual(0.2, summary["age_s"])
+
+        message.angular_velocity.z = float("nan")
+        with self.assertRaises(checker.RuntimeCheckError):
+            checker.imu_summary(message, now=10.0)
+
+    def test_status_summary_uses_official_bunker_boundary_shape(self):
+        checker = load_checker()
+        message = SimpleNamespace(
+            header=SimpleNamespace(
+                stamp=SimpleNamespace(to_sec=lambda: 9.9),
+                frame_id="ground/base_link"),
+            linear_velocity=0.2,
+            angular_velocity=-0.1,
+            base_state=0,
+            control_mode=0,
+            fault_code=0,
+            battery_voltage=0.0,
+        )
+        summary = checker.bunker_status_summary(message, now=10.0)
+        self.assertEqual("ground/base_link", summary["frame"])
+        self.assertEqual(0, summary["fault_code"])
+        self.assertAlmostEqual(0.2, summary["linear_velocity_mps"])
+
+        message.linear_velocity = float("inf")
+        with self.assertRaises(checker.RuntimeCheckError):
+            checker.bunker_status_summary(message, now=10.0)
+
+    def test_checker_uses_map_and_covers_driver_compatible_sensor_topics(self):
+        source = CHECKER.read_text(encoding="utf-8")
+        self.assertIn('(\"map\", \"ground/base_link\")', source)
+        self.assertIn('(\"ground/base_link\", \"ground/imu_link\")', source)
+        self.assertIn('"/ground/imu/data"', source)
+        self.assertIn('"/ground/bunker_status"', source)
+        self.assertIn("from bunker_msgs.msg import BunkerStatus", source)
+        self.assertIn("from sensor_msgs.msg import Imu, LaserScan", source)
+        self.assertNotIn('(\"world\", \"ground/base_link\")', source)
+
     def test_model_check_waits_for_spawn_to_finish(self):
         checker = load_checker()
         responses = iter([

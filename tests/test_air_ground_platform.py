@@ -244,6 +244,7 @@ class AirGroundPlatformTest(unittest.TestCase):
         self.assertEqual({
             "ground/base_link",
             "ground/lidar_2d_link",
+            "ground/imu_link",
             "ground/aubo_i5_base_link",
             "ground/ee_link",
             "ground/d435_color_optical_frame",
@@ -262,6 +263,7 @@ class AirGroundPlatformTest(unittest.TestCase):
                 "ground.check_runtime_ready", "ground.check_controllers",
                 "ground.current_joint_state", "ground.joint_state_summary",
                 "ground.check_sensors", "ground.check_ground_scan",
+                "bunker.check_imu", "bunker.check_status",
                 "bunker.check_motion"):
             self.assertIn(required, source)
         for forbidden in (

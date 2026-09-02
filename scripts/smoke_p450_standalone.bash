@@ -539,7 +539,7 @@ try:
         raise ValueError("capture must be an object")
     if capture.get("topic") != "/uav1/livox/lidar":
         raise ValueError("unexpected Livox topic")
-    if capture.get("type") != "prometheus_msgs/LivoxCustomMsg":
+    if capture.get("type") != "sensor_msgs/PointCloud2":
         raise ValueError("unexpected Livox message type")
     publishers = capture.get("publishers")
     if (not isinstance(publishers, list) or len(publishers) != 1 or
@@ -566,11 +566,16 @@ try:
         if stamp_ns <= 0 or stamp_ns <= previous_stamp:
             raise ValueError("Livox stamps must be nonzero and increasing")
         previous_stamp = stamp_ns
-        point_num = sample.get("point_num")
-        points = sample.get("points")
-        if (type(point_num) is not int or point_num <= 0 or
-                not isinstance(points, list) or point_num != len(points)):
-            raise ValueError("sample %d point count is invalid" % index)
+        width = sample.get("width")
+        height = sample.get("height")
+        point_step = sample.get("point_step")
+        row_step = sample.get("row_step")
+        data_size = sample.get("data_size")
+        if (any(type(value) is not int or value <= 0 for value in
+                (width, height, point_step, row_step, data_size)) or
+                row_step < width * point_step or
+                data_size != height * row_step):
+            raise ValueError("sample %d cloud shape is invalid" % index)
 except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
     print("invalid MID360 topic evidence: %s" % error, file=sys.stderr)
     raise SystemExit(65)
@@ -1198,7 +1203,7 @@ if verdict == "PASS":
         if (not isinstance(topic, dict) or
                 set(topic) != {"topic", "type", "publishers", "samples"} or
                 topic.get("topic") != "/uav1/livox/lidar" or
-                topic.get("type") != "prometheus_msgs/LivoxCustomMsg" or
+                topic.get("type") != "sensor_msgs/PointCloud2" or
                 not isinstance(topic.get("publishers"), list) or
                 len(topic["publishers"]) != 1 or
                 not isinstance(topic["publishers"][0], str) or
@@ -1209,7 +1214,8 @@ if verdict == "PASS":
         previous_stamp = -1
         for sample in topic["samples"]:
             if (not isinstance(sample, dict) or
-                    set(sample) != {"stamp", "frame_id", "point_num", "points"} or
+                    set(sample) != {"stamp", "frame_id", "width", "height",
+                                    "point_step", "row_step", "data_size"} or
                     sample.get("frame_id") != "uav1/lidar_link"):
                 raise ValueError("MID360 topic sample schema is invalid")
             stamp = sample.get("stamp")
@@ -1218,12 +1224,16 @@ if verdict == "PASS":
             secs, nsecs = stamp.get("secs"), stamp.get("nsecs")
             stamp_ns = (secs * 1000000000 + nsecs
                         if type(secs) is int and type(nsecs) is int else -1)
-            points, point_num = sample.get("points"), sample.get("point_num")
+            width, height = sample.get("width"), sample.get("height")
+            point_step = sample.get("point_step")
+            row_step, data_size = sample.get("row_step"), sample.get("data_size")
             if (type(secs) is not int or type(nsecs) is not int or secs < 0 or
                     nsecs < 0 or nsecs >= 1000000000 or
                     stamp_ns <= 0 or stamp_ns <= previous_stamp or
-                    type(point_num) is not int or point_num <= 0 or
-                    not isinstance(points, list) or point_num != len(points)):
+                    any(type(value) is not int or value <= 0 for value in
+                        (width, height, point_step, row_step, data_size)) or
+                    row_step < width * point_step or
+                    data_size != height * row_step):
                 raise ValueError("MID360 topic sample values are invalid")
             previous_stamp = stamp_ns
 
@@ -1901,13 +1911,13 @@ import sys
 
 import rosgraph
 import rospy
-from prometheus_msgs.msg import LivoxCustomMsg
+from sensor_msgs.msg import PointCloud2
 
 topic = "/uav1/livox/lidar"
 rospy.init_node("p450_smoke_mid360_topic", anonymous=True,
                 disable_signals=True)
 published_types = dict(rospy.get_published_topics(namespace="/"))
-if published_types.get(topic) != "prometheus_msgs/LivoxCustomMsg":
+if published_types.get(topic) != "sensor_msgs/PointCloud2":
     raise SystemExit("unexpected MID360 topic type: %r" %
                      published_types.get(topic))
 publishers = []
@@ -1924,15 +1934,18 @@ def collect(message):
         return
     samples.append({
         "frame_id": message.header.frame_id,
-        "point_num": message.point_num,
-        "points": [None] * len(message.points),
+        "width": message.width,
+        "height": message.height,
+        "point_step": message.point_step,
+        "row_step": message.row_step,
+        "data_size": len(message.data),
         "stamp": {
             "nsecs": message.header.stamp.nsecs,
             "secs": message.header.stamp.secs,
         },
     })
 
-subscriber = rospy.Subscriber(topic, LivoxCustomMsg, collect, queue_size=5)
+subscriber = rospy.Subscriber(topic, PointCloud2, collect, queue_size=5)
 deadline = rospy.Time.now().to_sec() + 20.0
 while len(samples) < 3 and not rospy.is_shutdown():
     rospy.sleep(0.02)
@@ -1942,7 +1955,7 @@ del subscriber
 with open(sys.argv[1], "x", encoding="utf-8") as stream:
     json.dump({"publishers": publishers, "samples": samples,
                "topic": topic,
-               "type": "prometheus_msgs/LivoxCustomMsg"}, stream,
+               "type": "sensor_msgs/PointCloud2"}, stream,
               sort_keys=True)
 PY
   then
