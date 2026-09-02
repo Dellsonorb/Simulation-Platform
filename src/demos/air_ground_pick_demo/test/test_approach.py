@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+
+import importlib.util
+import math
+from pathlib import Path
+import unittest
+
+
+MODULE = Path(__file__).resolve().parents[1] / (
+    "src/air_ground_pick_demo/approach.py")
+
+
+def load_module():
+    spec = importlib.util.spec_from_file_location(
+        "air_ground_standoff_test_target", str(MODULE))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class ApproachTest(unittest.TestCase):
+    def test_goal_stays_on_current_base_side_and_faces_target(self):
+        approach = load_module()
+        goal = approach.compute_standoff_goal(
+            current_xy=(3.0, 0.0), target_xy=(2.0, 0.0), standoff=0.82)
+        self.assertAlmostEqual(2.82, goal.x)
+        self.assertAlmostEqual(0.0, goal.y)
+        self.assertAlmostEqual(math.pi, abs(goal.yaw))
+        target_to_goal = (goal.x - 2.0, goal.y)
+        target_to_current = (1.0, 0.0)
+        self.assertGreater(sum(a * b for a, b in zip(
+            target_to_goal, target_to_current)), 0.0)
+        self.assertAlmostEqual(
+            0.82, math.hypot(goal.x - 2.0, goal.y))
+
+    def test_goal_is_symmetric_and_motion_decision_is_bounded(self):
+        approach = load_module()
+        goal = approach.compute_standoff_goal(
+            current_xy=(0.0, 0.0), target_xy=(2.0, 0.0), standoff=0.82)
+        self.assertAlmostEqual(1.18, goal.x)
+        self.assertAlmostEqual(0.0, goal.y)
+        self.assertAlmostEqual(0.0, goal.yaw)
+        self.assertTrue(approach.motion_required(
+            (0.0, 0.0), (goal.x, goal.y), tolerance=0.05))
+        self.assertFalse(approach.motion_required(
+            (1.16, 0.0), (goal.x, goal.y), tolerance=0.05))
+        self.assertAlmostEqual(
+            0.75, approach.travel_distance((3.5, 0.0), (2.75, 0.0)))
+
+    def test_degenerate_or_nonfinite_goal_is_rejected(self):
+        approach = load_module()
+        for current, target, standoff in (
+                ((2.0, 0.0), (2.0, 0.0), 0.82),
+                ((float("nan"), 0.0), (2.0, 0.0), 0.82),
+                ((3.0, 0.0), (2.0, 0.0), 0.0)):
+            with self.subTest(current=current, target=target):
+                with self.assertRaises(approach.ApproachError):
+                    approach.compute_standoff_goal(
+                        current, target, standoff)
+
+
+if __name__ == "__main__":
+    unittest.main()

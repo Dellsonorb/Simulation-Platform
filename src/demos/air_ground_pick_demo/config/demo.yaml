@@ -1,53 +1,32 @@
 status_topic: /air_ground_pick_demo/status
 
 uav_state_topic: /uav1/prometheus/state
-uav_control_state_topic: /uav1/prometheus/control_state
-uav_setup_topic: /uav1/prometheus/setup
-uav_command_topic: /uav1/prometheus/command
+flight_action: /uav1/runtime/flight
 air_pose_topic: /air_observer/target_pose
 
-ground_scan_topic: /ground/scan
-ground_cmd_topic: /ground/cmd_vel
+ground_navigation_action: /ground/move_base
+ground_stop_service: /ground/runtime/stop
 ground_pose_topic: /ground_observer/target_pose
 joint_state_topic: /ground/joint_states
 grasp_confirmed_topic: /ground/gripper/grasp_confirmed
 arm_action: /ground/arm_controller/follow_joint_trajectory
 gripper_action: /ground/gripper_controller/follow_joint_trajectory
-world_frame: world
+map_frame: map
 ground_base_frame: ground/base_link
 
 preflight_timeout: 30.0
-setup_timeout: 30.0
-takeoff_timeout: 35.0
-view_timeout: 35.0
+flight_action_timeout: 45.0
 observation_timeout: 20.0
-landing_timeout: 35.0
 flight_health_max_age: 1.0
-preflight_max_speed: 0.10
-takeoff_height: 1.50
 view_position: [-0.50, 0.0, 1.50]
 view_yaw: 0.0
-flight_position_tolerance: 0.25
-flight_settle_speed: 0.20
 observation_max_age: 1.0
 
 ground_standoff: 0.82
-ground_distance_tolerance: 0.06
-ground_heading_tolerance: 0.12
-ground_turn_in_place_angle: 0.45
-ground_linear_gain: 0.60
-ground_angular_gain: 1.20
-max_ground_linear: 0.25
-max_ground_angular: 0.50
-forward_sector_half_angle: 0.35
-obstacle_stop_distance: 0.45
-scan_max_age: 0.50
+ground_goal_tolerance: 0.06
 ground_tf_max_age: 0.50
-ground_timeout: 30.0
-blocked_timeout: 4.0
+navigation_timeout: 60.0
 max_ground_travel: 1.10
-command_period: 0.50
-stop_publish_count: 5
 
 observation_joint_names:
   - shoulder_pan_joint

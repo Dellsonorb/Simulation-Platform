@@ -270,7 +270,7 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         self.assertEqual(
             "/ground_observer/target_pose", ground["output_topic"])
         for config in (air, ground):
-            self.assertEqual("world", config["target_frame"])
+            self.assertEqual("map", config["target_frame"])
             self.assertEqual(0.115, config["target_height"])
             self.assertGreaterEqual(config["stable_frames"], 3)
             self.assertEqual(1.0, config["max_observation_age"])
@@ -293,141 +293,56 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
             self.assertEqual(
                 "/ground/runtime_ready", parameters["runtime_ready_topic"])
 
-    def test_one_shot_flight_sequence_is_minimal_and_ordered(self):
+    def test_flight_helpers_leave_command_sequencing_to_the_facade(self):
         flight = _load_module(
             FLIGHT, "air_ground_pick_flight_test_target")
-        sequence = flight.OneShotFlightSequence()
-        transitions = (
-            ("preflight_ready", "ARM", "ARMING"),
-            ("armed", "ENTER_COMMAND_CONTROL", "COMMAND_CONTROL"),
-            ("command_control_ready", "TAKEOFF", "TAKEOFF"),
-            ("airborne", "MOVE_VIEW", "AIR_VIEW"),
-            ("at_view", "OBSERVE", "AIR_OBSERVE"),
-            ("fresh_observation", "HANDOFF", "AIR_HANDOFF"),
-            ("handoff_published", "LAND", "LANDING"),
-            ("landed", "COMPLETE", "COMPLETE"),
-        )
-        actions = []
-        for event, expected_action, expected_phase in transitions:
-            actions.append(sequence.advance(event))
-            self.assertEqual(expected_action, actions[-1])
-            self.assertEqual(expected_phase, sequence.phase)
-        self.assertEqual(1, actions.count("TAKEOFF"))
-        self.assertEqual(1, actions.count("MOVE_VIEW"))
-        self.assertEqual(1, actions.count("LAND"))
-        with self.assertRaises(flight.FlightError):
-            sequence.advance("landed")
+        source = FLIGHT.read_text(encoding="utf-8")
+        self.assertTrue(flight.native_state_ready(
+            connected=True, odom_valid=True,
+            received_age=0.1, maximum_age=1.0))
+        for forbidden in (
+                "OneShotFlightSequence", "UAVCommand", "UAVSetup",
+                "UAVControlState", "safe_stop_actions"):
+            self.assertNotIn(forbidden, source)
 
-    def test_flight_health_arrival_observation_and_safe_stop(self):
+    def test_native_flight_health_and_map_observation_freshness(self):
         flight = _load_module(
             FLIGHT, "air_ground_pick_flight_health_test_target")
-        self.assertTrue(flight.preflight_ready(
-            connected=True, odom_valid=True, armed=False, failsafe=False,
-            velocity=(0.01, 0.0, 0.0), state_age=0.1,
-            control_age=0.1, max_age=1.0, max_speed=0.1))
-        self.assertFalse(flight.preflight_ready(
-            connected=True, odom_valid=True, armed=False, failsafe=False,
-            velocity=(0.2, 0.0, 0.0), state_age=0.1,
-            control_age=0.1, max_age=1.0, max_speed=0.1))
-        self.assertTrue(flight.message_is_fresh(age=0.1, max_age=1.0))
-        self.assertFalse(flight.message_is_fresh(age=1.1, max_age=1.0))
-        self.assertTrue(flight.position_reached(
-            (1.02, -0.01, 1.48), (1.0, 0.0, 1.5),
-            (0.02, 0.0, 0.01), tolerance=0.05, max_speed=0.05))
-        self.assertFalse(flight.position_reached(
-            (1.02, -0.01, 1.48), (1.0, 0.0, 1.5),
-            (0.20, 0.0, 0.0), tolerance=0.05, max_speed=0.05))
+        self.assertTrue(flight.native_state_ready(
+            connected=True, odom_valid=True,
+            received_age=0.1, maximum_age=1.0))
+        self.assertFalse(flight.native_state_ready(
+            connected=False, odom_valid=True,
+            received_age=0.1, maximum_age=1.0))
+        self.assertFalse(flight.native_state_ready(
+            connected=True, odom_valid=True,
+            received_age=1.1, maximum_age=1.0))
         self.assertTrue(flight.observation_is_fresh(
-            stamp=10.8, now=11.0, max_age=0.5,
-            frame_id="world", expected_frame="world"))
+            stamp=10.8, now=11.0, maximum_age=0.5,
+            frame_id="map", expected_frame="map"))
         self.assertFalse(flight.observation_is_fresh(
-            stamp=10.0, now=11.0, max_age=0.5,
-            frame_id="world", expected_frame="world"))
-        self.assertEqual(
-            ("HOLD", "LAND"),
-            flight.safe_stop_actions(armed=True, command_control=True))
-        self.assertEqual(
-            ("AUTO_LAND",),
-            flight.safe_stop_actions(armed=True, command_control=False))
-        self.assertEqual(
-            (), flight.safe_stop_actions(
-                armed=False, command_control=False))
+            stamp=10.0, now=11.0, maximum_age=0.5,
+            frame_id="map", expected_frame="map"))
+        self.assertFalse(flight.observation_is_fresh(
+            stamp=10.8, now=11.0, maximum_age=0.5,
+            frame_id="world", expected_frame="map"))
 
-    def test_ground_target_transform_heading_standoff_and_velocity_bounds(self):
+    def test_ground_standoff_goal_stays_on_current_side_and_faces_target(self):
         approach = _load_module(
             APPROACH, "air_ground_pick_approach_test_target")
-        target_x, target_y = approach.world_to_base(
-            target_xy=(2.0, 0.0), base_xy_yaw=(3.5, 0.0, math.pi))
-        self.assertAlmostEqual(1.5, target_x, places=6)
-        self.assertAlmostEqual(0.0, target_y, places=6)
-        limits = approach.ApproachLimits(
-            standoff=0.82, distance_tolerance=0.05,
-            heading_tolerance=0.10, turn_in_place_angle=0.45,
-            linear_gain=0.8, angular_gain=1.5,
-            max_linear=0.25, max_angular=0.50,
-            obstacle_stop_distance=0.45)
-        command = approach.compute_command(
-            target_x=target_x, target_y=0.30,
-            forward_clearance=2.0, limits=limits)
-        self.assertGreater(command.linear_x, 0.0)
-        self.assertGreater(command.angular_z, 0.0)
-        self.assertLessEqual(abs(command.linear_x), limits.max_linear)
-        self.assertLessEqual(abs(command.angular_z), limits.max_angular)
-        self.assertFalse(command.reached)
-        self.assertFalse(command.blocked)
+        goal = approach.compute_standoff_goal(
+            current_xy=(3.5, 0.0), target_xy=(2.0, 0.0), standoff=0.82)
+        self.assertAlmostEqual(2.82, goal.x)
+        self.assertAlmostEqual(0.0, goal.y)
+        self.assertAlmostEqual(math.pi, abs(goal.yaw))
+        self.assertAlmostEqual(0.82, goal.target_distance)
+        self.assertTrue(approach.motion_required(
+            current_xy=(3.5, 0.0), goal_xy=(goal.x, goal.y),
+            tolerance=0.05))
 
-        turn = approach.compute_command(
-            target_x=0.20, target_y=1.0,
-            forward_clearance=2.0, limits=limits)
-        self.assertEqual(0.0, turn.linear_x)
-        self.assertEqual(limits.max_angular, turn.angular_z)
-
-        stopped = approach.compute_command(
-            target_x=0.82, target_y=0.01,
-            forward_clearance=2.0, limits=limits)
-        self.assertEqual((0.0, 0.0),
-                         (stopped.linear_x, stopped.angular_z))
-        self.assertTrue(stopped.reached)
-
-        no_motion = approach.compute_command(
-            target_x=0.0, target_y=0.0,
-            forward_clearance=2.0, limits=limits)
-        self.assertEqual((0.0, 0.0),
-                         (no_motion.linear_x, no_motion.angular_z))
-        self.assertTrue(no_motion.reached)
-
-    def test_ground_approach_scan_safety_and_freshness(self):
+    def test_ground_navigation_geometry_and_tf_freshness(self):
         approach = _load_module(
             APPROACH, "air_ground_pick_approach_safety_test_target")
-        limits = approach.ApproachLimits(
-            standoff=0.82, distance_tolerance=0.05,
-            heading_tolerance=0.10, turn_in_place_angle=0.45,
-            linear_gain=0.8, angular_gain=1.5,
-            max_linear=0.25, max_angular=0.50,
-            obstacle_stop_distance=0.45)
-        ranges = [float("inf")] * 181
-        ranges[90] = 0.40
-        clearance = approach.forward_clearance(
-            ranges, angle_min=-math.pi / 2.0,
-            angle_increment=math.pi / 180.0,
-            sector_half_angle=0.30, range_min=0.05, range_max=10.0)
-        self.assertAlmostEqual(0.40, clearance)
-        blocked = approach.compute_command(
-            target_x=1.5, target_y=0.0,
-            forward_clearance=clearance, limits=limits)
-        self.assertEqual((0.0, 0.0),
-                         (blocked.linear_x, blocked.angular_z))
-        self.assertTrue(blocked.blocked)
-        self.assertFalse(blocked.reached)
-        with self.assertRaises(approach.ApproachError):
-            approach.forward_clearance(
-                [float("nan")] * 10, angle_min=-0.2,
-                angle_increment=0.04, sector_half_angle=0.3,
-                range_min=0.05, range_max=10.0)
-        self.assertTrue(approach.scan_is_fresh(
-            stamp=20.8, now=21.0, max_age=0.5))
-        self.assertFalse(approach.scan_is_fresh(
-            stamp=20.0, now=21.0, max_age=0.5))
         self.assertTrue(approach.transform_is_fresh(
             stamp=20.8, now=21.0, max_age=0.5))
         self.assertFalse(approach.transform_is_fresh(
@@ -435,8 +350,9 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         self.assertAlmostEqual(
             0.75, approach.travel_distance(
                 initial_xy=(3.5, 0.0), current_xy=(2.75, 0.0)))
-        self.assertIsNone(approach.clearance_for_status(float("inf")))
-        self.assertEqual(0.40, approach.clearance_for_status(0.40))
+        self.assertFalse(approach.motion_required(
+            current_xy=(2.80, 0.0), goal_xy=(2.82, 0.0),
+            tolerance=0.05))
 
     def test_ag95_feasibility_uses_real_opening_and_measured_joint(self):
         grasp = _load_module(
@@ -680,72 +596,49 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         self.assertEqual(
             "/uav1/prometheus/state", config["uav_state_topic"])
         self.assertEqual(
-            "/uav1/prometheus/control_state",
-            config["uav_control_state_topic"])
-        self.assertEqual(
-            "/uav1/prometheus/setup", config["uav_setup_topic"])
-        self.assertEqual(
-            "/uav1/prometheus/command", config["uav_command_topic"])
+            "/uav1/runtime/flight", config["flight_action"])
         self.assertEqual(
             "/air_observer/target_pose", config["air_pose_topic"])
-        self.assertEqual("/ground/scan", config["ground_scan_topic"])
-        self.assertEqual("/ground/cmd_vel", config["ground_cmd_topic"])
-        self.assertEqual("world", config["world_frame"])
+        self.assertEqual(
+            "/ground/move_base", config["ground_navigation_action"])
+        self.assertEqual(
+            "/ground/runtime/stop", config["ground_stop_service"])
+        self.assertEqual("map", config["map_frame"])
         self.assertEqual("ground/base_link", config["ground_base_frame"])
-        self.assertGreater(config["ground_standoff"],
-                           config["obstacle_stop_distance"])
-        self.assertLessEqual(config["max_ground_linear"], 0.25)
-        self.assertLessEqual(config["max_ground_angular"], 0.50)
+        self.assertEqual(
+            "/ground/gripper/grasp_confirmed",
+            config["grasp_confirmed_topic"])
+        self.assertGreater(config["ground_standoff"], 0.0)
         self.assertGreater(config["max_ground_travel"], 0.0)
-        self.assertGreater(config["ground_timeout"], 0.0)
+        self.assertGreater(config["navigation_timeout"], 0.0)
         self.assertGreater(config["ground_tf_max_age"], 0.0)
+        for removed in (
+                "uav_control_state_topic", "uav_setup_topic",
+                "uav_command_topic", "ground_scan_topic",
+                "ground_cmd_topic", "world_frame", "ground_timeout"):
+            self.assertNotIn(removed, config)
 
         source = ORCHESTRATOR.read_text(encoding="utf-8")
         for required in (
-                "OneShotFlightSequence", "preflight_ready",
-                "observation_is_fresh", "world_to_base",
-                "forward_clearance", "compute_command",
-                "transform_is_fresh",
-                "UAVSetup", "UAVCommand", "UAVControlState", "UAVState",
-                "LaserScan", "Twist", "PoseStamped", "lookup_transform",
-                "AIR_HANDOFF", "GROUND_STOPPED", "safe_stop_actions"):
+                "FlightCommandAction", "FlightCommandGoal",
+                "MoveBaseAction", "MoveBaseGoal", "Trigger", "UAVState",
+                "observation_is_fresh", "compute_standoff_goal",
+                "transform_is_fresh", "PoseStamped", "lookup_transform",
+                "AIR_HANDOFF", "GROUND_STOPPED", "grasp_confirmed"):
             self.assertIn(required, source)
         lowered = source.lower()
         for forbidden in (
                 "/gazebo/model", "getmodelstate", "setmodelstate",
                 "teleport", "attach", "benchmark", "provenance",
-                "task-aware", "rm4d"):
+                "task-aware", "rm4d", "uavcommand", "uavsetup",
+                "uavcontrolstate", "laserscan", "twist", "world",
+                "/ground/cmd_vel", "/ground/nav_cmd_vel"):
             self.assertNotIn(forbidden, lowered)
         safe_land = source.split("def _safe_land", 1)[1].split(
             "def run", 1)[0]
-        self.assertIn("while not rospy.is_shutdown()", safe_land)
-        self.assertIn("self._landing_timeout", safe_land)
-        self.assertIn("state.armed", safe_land)
-        self.assertIn(
-            "self._uav_state_is_current(snapshot, now)", safe_land)
-        self.assertEqual(1, safe_land.count("self._snapshot()"))
-        repeat_until = source.split("def _repeat_until", 1)[1].split(
-            "def _preflight_is_ready", 1)[0]
-        self.assertIn("health_check", repeat_until)
-        self.assertIn("flight health lost", repeat_until)
-        observe = source.split("def _observe_and_handoff", 1)[1].split(
-            "def _land", 1)[0]
-        self.assertIn(
-            "self._command_flight_is_healthy(\n"
-            "                    snapshot, time.monotonic())", observe)
-        landing = source.split("def _land", 1)[1].split(
-            "def _yaw_from_quaternion", 1)[0]
-        self.assertIn(
-            "self._uav_state_is_current(snapshot, now)", landing)
-        self.assertEqual(1, landing.count("self._snapshot()"))
-        flight_health = source.split(
-            "def _flight_state_is_fresh", 1)[1].split(
-                "def _arm", 1)[0]
-        self.assertIn("snapshot=None", flight_health)
-        self.assertIn(
-            "self._uav_state_is_current(snapshot, now)", flight_health)
-        self.assertIn(
-            "self._control_state_is_current(snapshot, now)", flight_health)
+        self.assertIn("self._request_land()", safe_land)
+        self.assertIn("self._hover_command", safe_land)
+        self.assertNotIn("UAVCommand", safe_land)
 
     def test_orchestrator_direct_execution_does_not_shadow_package(self):
         system_python = Path("/usr/bin/python3")

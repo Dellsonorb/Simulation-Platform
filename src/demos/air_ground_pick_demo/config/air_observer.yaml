@@ -3,7 +3,7 @@ depth_topic: /uav1/camera/depth/image_raw
 color_info_topic: /uav1/camera/color/camera_info
 depth_info_topic: /uav1/camera/depth/camera_info
 camera_optical_frame: uav1/camera_link
-target_frame: world
+target_frame: map
 output_topic: /air_observer/target_pose
 status_topic: /air_observer/status
 target_height: 0.115
