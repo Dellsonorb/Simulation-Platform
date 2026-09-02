@@ -100,8 +100,6 @@ EXPECTED_LIDAR_QUATERNION = (
     math.cos(0.175),
 )
 EXPECTED_STATIC_TRANSFORMS = {
-    "uav1/local_origin": (
-        "world", (0.0, 0.0, 0.15), (0.0, 0.0, 0.0, 1.0)),
     "uav1/camera_depth_frame": (
         "uav1/camera_link", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)),
     "uav1/camera_ired1_frame": (
@@ -345,26 +343,21 @@ class RuntimeLaunchContractTest(unittest.TestCase):
             max(children.index(load) for load in loads),
         )
 
-    def test_px4_local_origin_is_explicitly_anchored_in_gazebo_world(self):
-        origin = _one([
-            node for node in _nodes(
-                self.root, "tf2_ros", "static_transform_publisher")
-            if node.get("name") == "p450_tf_world_local_origin"
-        ], "P450 world to local-origin transform")
-        self.assertEqual(
-            "$(arg uav1_init_x) $(arg uav1_init_y) $(arg uav1_init_z) "
-            "0 0 0 world uav1/local_origin",
-            origin.get("args"),
-        )
-
+    def test_runtime_uses_uav_odom_and_owns_no_global_anchor(self):
         controller = _one(
             _nodes(self.root, "prometheus_uav_control", "uav_control_main"),
             "Prometheus UAV controller")
         parameters = _param_map(controller)
         self.assertEqual(
-            "uav1/local_origin",
+            "uav1/odom",
             parameters["tf_parent_frame"].get("value"),
         )
+        static_nodes = _nodes(
+            self.root, "tf2_ros", "static_transform_publisher")
+        self.assertTrue(all(
+            " world " not in " %s " % node.get("args", "")
+            and " map uav1/odom" not in node.get("args", "")
+            for node in static_nodes))
 
         estimator = _read(UAV_ESTIMATOR)
         self.assertIn(
@@ -464,11 +457,7 @@ class RuntimeLaunchContractTest(unittest.TestCase):
 
     def test_static_tf_nodes_match_the_unique_authority_matrix(self):
         nodes = _nodes(self.root, "tf2_ros", "static_transform_publisher")
-        self.assertEqual(8, len(nodes))
-        nodes = [
-            node for node in nodes
-            if node.get("name") != "p450_tf_world_local_origin"
-        ]
+        self.assertEqual(7, len(nodes))
         actual = {}
         for node in nodes:
             arguments = shlex.split(node.get("args"))
@@ -478,11 +467,7 @@ class RuntimeLaunchContractTest(unittest.TestCase):
             parent, child = arguments[7:]
             self.assertNotIn(child, actual)
             actual[child] = (parent, translation, rotation)
-        expected = {
-            child: transform
-            for child, transform in EXPECTED_STATIC_TRANSFORMS.items()
-            if child != "uav1/local_origin"
-        }
+        expected = EXPECTED_STATIC_TRANSFORMS
         self.assertEqual(set(expected), set(actual))
         self.assertNotIn("uav1/lidar_link", actual)
         for child, transform in expected.items():
@@ -496,7 +481,19 @@ class StandaloneLaunchContractTest(unittest.TestCase):
         self.root = _xml(STANDALONE_LAUNCH)
 
     def test_standalone_owns_one_world_and_includes_one_runtime(self):
-        self.assertEqual([], self.root.findall(".//node"))
+        localization_nodes = {
+            node.get("name"): node
+            for node in self.root.findall("./node")
+        }
+        self.assertEqual({"sim_world_to_map", "sim_localization_uav1"},
+                         set(localization_nodes))
+        self.assertEqual(
+            "0 0 0 0 0 0 1 world map",
+            localization_nodes["sim_world_to_map"].get("args"))
+        self.assertEqual(
+            "$(arg uav1_init_x) $(arg uav1_init_y) $(arg uav1_init_z) "
+            "$(arg uav1_init_yaw) 0 0 map uav1/odom",
+            localization_nodes["sim_localization_uav1"].get("args"))
         arguments = {arg.get("name"): arg.get("default")
                      for arg in self.root.findall("./arg")}
         self.assertEqual({
@@ -631,7 +628,7 @@ class TfContractTest(unittest.TestCase):
         transforms = self.contract["transforms"]
         dynamic = transforms["dynamic"]
         self.assertEqual([
-            ("uav1/local_origin", "uav1/base_link", "/uav_control_main_1"),
+            ("uav1/odom", "uav1/base_link", "/uav_control_main_1"),
             ("uav1/base_link", "uav1/camera_link", "/uav_control_main_1"),
         ], [(item["parent"], item["child"], item["authority"])
             for item in dynamic])
@@ -946,8 +943,8 @@ class PackageAndSmokeContractTest(unittest.TestCase):
                 },
                 "model": {"count": 1, "name": "p450_D435i_0"},
                 "tf_authorities": {
-                    "uav1/local_origin": [
-                        "/uav1/p450_tf_world_local_origin"],
+                    "map": ["/sim_world_to_map"],
+                    "uav1/odom": ["/sim_localization_uav1"],
                     "uav1/base_link": ["/uav_control_main_1"],
                     "uav1/camera_link": ["/uav_control_main_1"],
                     "uav1/camera_depth_frame": [
@@ -1580,8 +1577,8 @@ class PackageAndSmokeContractTest(unittest.TestCase):
         self.assertLess(source.index(guard), source.index("p450_script_path="))
 
         expected = {
-            "uav1/local_origin": [
-                "/uav1/p450_tf_world_local_origin"],
+            "map": ["/sim_world_to_map"],
+            "uav1/odom": ["/sim_localization_uav1"],
             "uav1/base_link": ["/uav_control_main_1"],
             "uav1/camera_link": ["/uav_control_main_1"],
             "uav1/camera_depth_frame": ["/uav1/p450_tf_camera_depth"],

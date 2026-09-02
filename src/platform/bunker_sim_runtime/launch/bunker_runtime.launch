@@ -18,8 +18,5 @@
       args="-urdf -param robot_description -model bunker -x $(arg x) -y $(arg y) -z $(arg z) -R $(arg roll) -P $(arg pitch) -Y $(arg yaw)"/>
     <node pkg="robot_state_publisher" type="robot_state_publisher"
       name="robot_state_publisher" output="screen"/>
-    <node pkg="tf2_ros" type="static_transform_publisher"
-      name="world_to_odom"
-      args="0 0 0 0 0 0 1 world ground/odom"/>
   </group>
 </launch>

@@ -30,8 +30,5 @@
       args="--wait-for model_spawned joint_state_controller arm_controller gripper_controller"/>
     <node pkg="robot_state_publisher" type="robot_state_publisher"
       name="robot_state_publisher" required="true" output="screen"/>
-    <node pkg="tf2_ros" type="static_transform_publisher"
-      name="world_to_odom" required="true"
-      args="0 0 0 0 0 0 1 world ground/odom"/>
   </group>
 </launch>

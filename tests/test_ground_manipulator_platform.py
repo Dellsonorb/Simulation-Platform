@@ -862,7 +862,7 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
         nodes = {node.get("name"): node for node in group.findall("node")}
         self.assertEqual({
             "velocity_guard", "spawn_ground_robot", "controller_spawner",
-            "robot_state_publisher", "world_to_odom",
+            "robot_state_publisher",
         }, set(nodes))
         self.assertEqual(
             ("bunker_sim_runtime", "velocity_guard.py"),
@@ -886,9 +886,8 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
             "--wait-for model_spawned joint_state_controller "
             "arm_controller gripper_controller",
             nodes["controller_spawner"].get("args"))
-        self.assertEqual(
-            "0 0 0 0 0 0 1 world ground/odom",
-            nodes["world_to_odom"].get("args"))
+        self.assertFalse(any(
+            node.get("pkg") == "tf2_ros" for node in nodes.values()))
         descriptions = [
             param for param in group.findall("param")
             if param.get("name") == "robot_description"]
@@ -898,6 +897,14 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
             descriptions[0].get("command"))
 
         standalone = ET.parse(str(STANDALONE_LAUNCH)).getroot()
+        localization = {
+            node.get("name"): node.get("args")
+            for node in standalone.findall("node")
+        }
+        self.assertEqual({
+            "sim_world_to_map": "0 0 0 0 0 0 1 world map",
+            "sim_localization_ground": "0 0 0 0 0 0 map ground/odom",
+        }, localization)
         includes = standalone.findall("include")
         self.assertEqual(2, len(includes))
         self.assertEqual(1, sum(

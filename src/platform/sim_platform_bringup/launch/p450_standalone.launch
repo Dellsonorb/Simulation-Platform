@@ -18,6 +18,14 @@
     <arg name="use_sim_time" value="$(arg use_sim_time)"/>
   </include>
 
+  <!-- SIM localization adapter. REAL provides map from RTK/VIO/SLAM/EKF. -->
+  <node pkg="tf2_ros" type="static_transform_publisher"
+    name="sim_world_to_map" required="true"
+    args="0 0 0 0 0 0 1 world map"/>
+  <node pkg="tf2_ros" type="static_transform_publisher"
+    name="sim_localization_uav1" required="true"
+    args="$(arg uav1_init_x) $(arg uav1_init_y) $(arg uav1_init_z) $(arg uav1_init_yaw) 0 0 map uav1/odom"/>
+
   <include file="$(find sim_platform_bringup)/launch/p450_runtime.launch">
     <arg name="use_sim_time" value="$(arg use_sim_time)"/>
     <arg name="uav1_init_x" value="$(arg uav1_init_x)"/>

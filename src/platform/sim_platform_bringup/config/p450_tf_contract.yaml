@@ -7,9 +7,14 @@ controller:
     translation_m: [0.13614773689465415, 0.0, 0.11272472554168546]
     rpy_rad: [-1.9207963267948966, 0.0, -1.5707963267948966]
 
+localization_adapter:
+  global_frame: map
+  odom_frame: uav1/odom
+  authority: exactly_one
+
 transforms:
   dynamic:
-    - parent: uav1/local_origin
+    - parent: uav1/odom
       child: uav1/base_link
       authority: /uav_control_main_1
     - parent: uav1/base_link
@@ -19,11 +24,6 @@ transforms:
       rotation_xyzw: [-0.5794173382492648, 0.5794173382492647, -0.4053092006556687, 0.4053092006556688]
 
   static:
-    - parent: world
-      child: uav1/local_origin
-      authority: /uav1/p450_tf_world_local_origin
-      translation_m: [0.0, 0.0, 0.15]
-      rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
     - parent: uav1/camera_link
       child: uav1/camera_depth_frame
       authority: /uav1/p450_tf_camera_depth

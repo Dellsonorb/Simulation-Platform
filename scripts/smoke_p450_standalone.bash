@@ -826,7 +826,8 @@ import sys
 from pathlib import Path
 
 expected = {
-    "uav1/local_origin": {"/uav1/p450_tf_world_local_origin"},
+    "map": {"/sim_world_to_map"},
+    "uav1/odom": {"/sim_localization_uav1"},
     "uav1/base_link": {"/uav_control_main_1"},
     "uav1/camera_link": {"/uav_control_main_1"},
     "uav1/camera_depth_frame": {"/uav1/p450_tf_camera_depth"},
@@ -1017,7 +1018,8 @@ if verdict == "PASS":
         "model", "prometheus_state", "px4_process", "uav_controller_node",
     }
     expected_authorities = {
-        "uav1/local_origin": ["/uav1/p450_tf_world_local_origin"],
+        "map": ["/sim_world_to_map"],
+        "uav1/odom": ["/sim_localization_uav1"],
         "uav1/base_link": ["/uav_control_main_1"],
         "uav1/camera_link": ["/uav_control_main_1"],
         "uav1/camera_depth_frame": ["/uav1/p450_tf_camera_depth"],
@@ -1989,7 +1991,7 @@ for frame in frames:
     while time.monotonic() < deadline:
         try:
             transform = buffer.lookup_transform(
-                "world", frame, rospy.Time(0), rospy.Duration(0.5))
+                "map", frame, rospy.Time(0), rospy.Duration(0.5))
             now = rospy.Time.now()
             stamp = transform.header.stamp
             age = (now - stamp).to_sec()
@@ -1997,14 +1999,14 @@ for frame in frames:
                 raise RuntimeError("simulation or transform time is zero")
             if age < -0.2 or age > 2.0:
                 raise RuntimeError("transform age %.6f is not current" % age)
-            print("world -> %s stamp=%.9f age=%.6f" %
+            print("map -> %s stamp=%.9f age=%.6f" %
                   (frame, stamp.to_sec(), age))
             break
         except Exception as error:  # tf2 exceptions share this retry path.
             last_error = error
             time.sleep(0.1)
     else:
-        raise SystemExit("cannot resolve current world -> %s: %s" %
+        raise SystemExit("cannot resolve current map -> %s: %s" %
                          (frame, last_error))
 if sys.argv[1] == "mid360":
     transform = buffer.lookup_transform(

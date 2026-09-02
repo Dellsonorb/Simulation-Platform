@@ -246,17 +246,17 @@ def check_current_tf_frames(rospy, tf2_ros, frames, timeout):
             remaining = max(0.01, deadline - time.monotonic())
             try:
                 transform = buffer.lookup_transform(
-                    "world", source, rospy.Time(0),
+                    "map", source, rospy.Time(0),
                     rospy.Duration(min(0.5, remaining)))
                 observed.append(transform_summary(
-                    transform, "world", source, rospy.Time.now().to_sec()))
+                    transform, "map", source, rospy.Time.now().to_sec()))
                 break
             except Exception as error:
                 last_error = error
                 time.sleep(0.05)
         else:
             raise RuntimeCheckError(
-                "missing current TF world <- %s: %s" %
+                "missing current TF map <- %s: %s" %
                 (source, last_error))
     # Keep the listener alive until every lookup has completed.
     _ = listener

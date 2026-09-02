@@ -12,6 +12,13 @@
     <arg name="server_required" value="true"/>
   </include>
 
+  <node pkg="tf2_ros" type="static_transform_publisher"
+    name="sim_world_to_map" required="true"
+    args="0 0 0 0 0 0 1 world map"/>
+  <node pkg="tf2_ros" type="static_transform_publisher"
+    name="sim_localization_ground" required="true"
+    args="0 0 0 0 0 0 map ground/odom"/>
+
   <include
     file="$(find ground_manipulator_runtime)/launch/ground_robot_runtime.launch"/>
 </launch>

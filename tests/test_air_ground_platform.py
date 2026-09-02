@@ -56,6 +56,27 @@ class AirGroundPlatformTest(unittest.TestCase):
             runtime_root = ET.parse(str(runtime)).getroot()
             self.assertFalse(any("empty_world.launch" in include.get("file", "")
                                  for include in runtime_root.findall(".//include")))
+            self.assertFalse(any(
+                node.get("pkg") == "tf2_ros"
+                and (" world " in " %s " % node.get("args", "")
+                     or " map " in " %s " % node.get("args", ""))
+                for node in runtime_root.findall(".//node")))
+
+        localization = {
+            node.get("name"): node.get("args")
+            for node in root.findall("./node")
+            if node.get("pkg") == "tf2_ros"
+        }
+        self.assertEqual({
+            "sim_world_to_map": "0 0 0 0 0 0 1 world map",
+            "sim_localization_uav1": (
+                "$(arg uav1_init_x) $(arg uav1_init_y) "
+                "$(arg uav1_init_z) $(arg uav1_init_yaw) 0 0 "
+                "map uav1/odom"),
+            "sim_localization_ground": (
+                "$(arg bunker_x) $(arg bunker_y) $(arg bunker_z) "
+                "$(arg bunker_yaw) 0 0 map ground/odom"),
+        }, localization)
 
     def test_shared_world_provides_ground_and_a_lidar_landmark(self):
         root = ET.parse(str(WORLD)).getroot()
@@ -191,14 +212,14 @@ class AirGroundPlatformTest(unittest.TestCase):
         self.assertEqual(
             "/uav1/camera/depth/camera_info", contracts[3][1])
 
-    def test_checker_requires_current_finite_world_tf_for_public_frames(self):
+    def test_checker_requires_current_finite_map_tf_for_public_frames(self):
         checker = _load_checker()
 
         def transform(stamp=9.8, translation_x=0.1):
             return SimpleNamespace(
                 header=SimpleNamespace(
                     stamp=SimpleNamespace(to_sec=lambda: stamp),
-                    frame_id="world"),
+                    frame_id="map"),
                 child_frame_id="uav1/base_link",
                 transform=SimpleNamespace(
                     translation=SimpleNamespace(
@@ -207,16 +228,16 @@ class AirGroundPlatformTest(unittest.TestCase):
                         x=0.0, y=0.0, z=0.0, w=1.0)))
 
         summary = checker.transform_summary(
-            transform(), "world", "uav1/base_link", now=10.0)
+            transform(), "map", "uav1/base_link", now=10.0)
         self.assertAlmostEqual(0.2, summary["age_s"])
-        self.assertEqual("world<-uav1/base_link", summary["chain"])
+        self.assertEqual("map<-uav1/base_link", summary["chain"])
         with self.assertRaises(checker.RuntimeCheckError):
             checker.transform_summary(
-                transform(stamp=7.0), "world", "uav1/base_link", now=10.0)
+                transform(stamp=7.0), "map", "uav1/base_link", now=10.0)
         with self.assertRaises(checker.RuntimeCheckError):
             checker.transform_summary(
                 transform(translation_x=float("inf")),
-                "world", "uav1/base_link", now=10.0)
+                "map", "uav1/base_link", now=10.0)
 
         self.assertIn("uav1/camera_imu_link", checker.AIR_TF_FRAMES)
         self.assertIn("uav1/camera_color_optical_frame", checker.AIR_TF_FRAMES)
