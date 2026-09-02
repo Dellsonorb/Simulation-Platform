@@ -79,8 +79,8 @@ def status_sequence_summary(
     if tcp_lift < minimum:
         raise DemoCheckError(
             "AUBO TCP lift %.3f m is below %.3f m" % (tcp_lift, minimum))
-    if lifted.get("bilateral_contact") is not True:
-        raise DemoCheckError("LIFT status did not retain bilateral contact")
+    if lifted.get("grasp_confirmed") is not True:
+        raise DemoCheckError("LIFT status did not retain grasp confirmation")
 
     return {
         "states": states,
@@ -158,11 +158,10 @@ def controller_success_summary(
     }
 
 
-def bilateral_contact_summary(observed):
+def grasp_confirmation_summary(observed):
     if observed is not True:
-        raise DemoCheckError(
-            "target never contacted both physical AG95 pads simultaneously")
-    return {"bilateral_contact": True}
+        raise DemoCheckError("backend never confirmed the AG95 grasp")
+    return {"grasp_confirmed": True}
 
 
 def target_lift_summary(baseline_z, final_z, minimum_lift):
@@ -192,10 +191,9 @@ def finalized_summary(payload):
 
 
 class DemoMonitor:
-    def __init__(self, rospy, goal_succeeded, contact_sides, target_model):
+    def __init__(self, rospy, goal_succeeded, target_model):
         self._rospy = rospy
         self._goal_succeeded = goal_succeeded
-        self._contact_sides = contact_sides
         self._target_model = target_model
         self._lock = threading.Lock()
         self.events = []
@@ -203,7 +201,7 @@ class DemoMonitor:
         self.ground_observations = deque(maxlen=5000)
         self.armed_samples = deque(maxlen=5000)
         self.arm_successes = {}
-        self.bilateral_contact = False
+        self.grasp_confirmed = False
         self.target_baseline_z = None
         self.target_latest_z = None
         self.error = None
@@ -263,14 +261,10 @@ class DemoMonitor:
                         "stamp-%.9f" % status.goal_id.stamp.to_sec())
                     self.arm_successes.setdefault(goal_id, receipt_stamp)
 
-    def contacts(self, message):
-        pairs = tuple(
-            (state.collision1_name, state.collision2_name)
-            for state in message.states)
-        left, right = self._contact_sides(pairs)
-        if left and right:
+    def grasp(self, message):
+        if bool(message.data):
             with self._lock:
-                self.bilateral_contact = True
+                self.grasp_confirmed = True
 
     def models(self, message):
         try:
@@ -301,7 +295,7 @@ class DemoMonitor:
                 "arm_successes": tuple(
                     (stamp, goal_id)
                     for goal_id, stamp in self.arm_successes.items()),
-                "bilateral_contact": self.bilateral_contact,
+                "grasp_confirmed": self.grasp_confirmed,
                 "target_baseline_z": self.target_baseline_z,
                 "target_latest_z": self.target_latest_z,
                 "error": self.error,
@@ -319,15 +313,14 @@ def _write_summary(path, payload):
 def run(args):
     import rospy
     from actionlib_msgs.msg import GoalStatus, GoalStatusArray
-    from gazebo_msgs.msg import ContactsState, ModelStates
+    from gazebo_msgs.msg import ModelStates
     from geometry_msgs.msg import PoseStamped
     from prometheus_msgs.msg import UAVState
-    from std_msgs.msg import String
-    from air_ground_pick_demo.grasp import contact_sides
+    from std_msgs.msg import Bool, String
 
     rospy.init_node("check_air_ground_pick_demo", anonymous=True)
     monitor = DemoMonitor(
-        rospy, GoalStatus.SUCCEEDED, contact_sides, args.target_model)
+        rospy, GoalStatus.SUCCEEDED, args.target_model)
     subscriptions = (
         rospy.Subscriber(args.status_topic, String, monitor.status,
                          queue_size=50),
@@ -342,7 +335,7 @@ def run(args):
             args.arm_status_topic, GoalStatusArray, monitor.arm_status,
             queue_size=20),
         rospy.Subscriber(
-            args.contact_topic, ContactsState, monitor.contacts,
+            args.grasp_confirmed_topic, Bool, monitor.grasp,
             queue_size=20),
         rospy.Subscriber(
             args.model_states_topic, ModelStates, monitor.models,
@@ -378,7 +371,7 @@ def run(args):
     controllers = controller_success_summary(
         captured["arm_successes"], ground_event["ros_time"],
         args.minimum_arm_successes)
-    contact = bilateral_contact_summary(captured["bilateral_contact"])
+    grasp = grasp_confirmation_summary(captured["grasp_confirmed"])
     physical_lift = target_lift_summary(
         captured["target_baseline_z"], captured["target_latest_z"],
         args.minimum_lift)
@@ -388,7 +381,7 @@ def run(args):
         "observations": {"aerial": aerial, "ground": ground},
         "flight": flight,
         "arm_controller": controllers,
-        "contact": contact,
+        "grasp": grasp,
         "physical_target": physical_lift,
     }
 
@@ -409,7 +402,9 @@ def parse_args(argv=None):
     parser.add_argument(
         "--arm-status-topic",
         default="/ground/arm_controller/follow_joint_trajectory/status")
-    parser.add_argument("--contact-topic", default="/pick_target/contacts")
+    parser.add_argument(
+        "--grasp-confirmed-topic",
+        default="/ground/gripper/grasp_confirmed")
     parser.add_argument("--model-states-topic", default="/gazebo/model_states")
     parser.add_argument("--target-model", default="pick_target")
     parser.add_argument("--world-frame", default="world")

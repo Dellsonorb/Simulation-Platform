@@ -10,7 +10,7 @@ ground_scan_topic: /ground/scan
 ground_cmd_topic: /ground/cmd_vel
 ground_pose_topic: /ground_observer/target_pose
 joint_state_topic: /ground/joint_states
-contact_topic: /pick_target/contacts
+grasp_confirmed_topic: /ground/gripper/grasp_confirmed
 arm_action: /ground/arm_controller/follow_joint_trajectory
 gripper_action: /ground/gripper_controller/follow_joint_trajectory
 world_frame: world
@@ -98,6 +98,6 @@ minimum_lift: 0.10
 finger_pad_lower_edge_offset: 0.0156
 contact_overlap: 0.020
 surface_clearance: 0.010
-contact_max_age: 0.30
-contact_timeout: 5.0
+grasp_confirmation_max_age: 0.20
+grasp_confirmation_timeout: 5.0
 retention_hold: 1.0

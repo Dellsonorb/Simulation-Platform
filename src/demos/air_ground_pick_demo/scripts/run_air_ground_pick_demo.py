@@ -13,14 +13,13 @@ from control_msgs.msg import (
     FollowJointTrajectoryAction,
     FollowJointTrajectoryGoal,
 )
-from gazebo_msgs.msg import ContactsState
 from geometry_msgs.msg import PoseStamped, Twist
 import moveit_commander
 from moveit_msgs.msg import RobotState
 from prometheus_msgs.msg import UAVCommand, UAVControlState, UAVSetup, UAVState
 import rospy
 from sensor_msgs.msg import JointState, LaserScan
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from tf2_geometry_msgs import do_transform_pose
 import tf2_ros
 from trajectory_msgs.msg import JointTrajectoryPoint
@@ -48,7 +47,6 @@ from air_ground_pick_demo.grasp import (
     GraspError,
     check_target_feasibility,
     conservative_jaw_opening,
-    contact_sides,
     generate_top_down_grasp,
     zero_terminal_motion,
 )
@@ -72,8 +70,8 @@ class AirGroundPickDemo:
         self._air_pose_received = None
         self._ground_pose_received = None
         self._joint_state_received = None
-        self._left_contact_received = None
-        self._right_contact_received = None
+        self._grasp_confirmed = False
+        self._grasp_confirmation_received = None
         self._sequence = OneShotFlightSequence()
         self._command_id = 0
 
@@ -88,7 +86,7 @@ class AirGroundPickDemo:
         self._ground_cmd_topic = self._param("ground_cmd_topic")
         self._ground_pose_topic = self._param("ground_pose_topic")
         self._joint_state_topic = self._param("joint_state_topic")
-        self._contact_topic = self._param("contact_topic")
+        self._grasp_confirmed_topic = self._param("grasp_confirmed_topic")
         self._arm_action = self._param("arm_action")
         self._gripper_action = self._param("gripper_action")
         self._world_frame = self._param("world_frame")
@@ -208,8 +206,10 @@ class AirGroundPickDemo:
             "finger_pad_lower_edge_offset")
         self._contact_overlap = self._positive("contact_overlap")
         self._surface_clearance = self._nonnegative("surface_clearance")
-        self._contact_max_age = self._positive("contact_max_age")
-        self._contact_timeout = self._positive("contact_timeout")
+        self._grasp_confirmation_max_age = self._positive(
+            "grasp_confirmation_max_age")
+        self._grasp_confirmation_timeout = self._positive(
+            "grasp_confirmation_timeout")
         self._retention_hold = self._positive("retention_hold")
         self._feasibility = check_target_feasibility(
             self._target_size, self._maximum_gripper_opening,
@@ -244,7 +244,8 @@ class AirGroundPickDemo:
             self._joint_state_topic, JointState, self._joint_state_callback,
             queue_size=10)
         rospy.Subscriber(
-            self._contact_topic, ContactsState, self._contact_callback,
+            self._grasp_confirmed_topic, Bool,
+            self._grasp_confirmation_callback,
             queue_size=10)
         self._arm_client = actionlib.SimpleActionClient(
             self._arm_action, FollowJointTrajectoryAction)
@@ -352,17 +353,10 @@ class AirGroundPickDemo:
             self._joint_state = message
             self._joint_state_received = time.monotonic()
 
-    def _contact_callback(self, message):
-        pairs = tuple(
-            (state.collision1_name, state.collision2_name)
-            for state in message.states)
-        left, right = contact_sides(pairs)
-        now = time.monotonic()
+    def _grasp_confirmation_callback(self, message):
         with self._lock:
-            if left:
-                self._left_contact_received = now
-            if right:
-                self._right_contact_received = now
+            self._grasp_confirmed = bool(message.data)
+            self._grasp_confirmation_received = time.monotonic()
 
     def _snapshot(self):
         with self._lock:
@@ -376,7 +370,7 @@ class AirGroundPickDemo:
             return (
                 self._ground_target_pose, self._ground_pose_received,
                 self._joint_state, self._joint_state_received,
-                self._left_contact_received, self._right_contact_received)
+                self._grasp_confirmed, self._grasp_confirmation_received)
 
     def _publish_status(self, state, **details):
         payload = {
@@ -849,7 +843,7 @@ class AirGroundPickDemo:
 
     def _execute_trajectory(
             self, client, names, positions, duration, timeout, label,
-            accept_contact_stall=False):
+            accept_grasp_stall=False):
         if not client.wait_for_server(rospy.Duration(timeout)):
             raise DemoError(label + " controller action is unavailable")
         client.send_goal(self._trajectory_goal(names, positions, duration))
@@ -859,15 +853,15 @@ class AirGroundPickDemo:
         state = client.get_state()
         if state == GoalStatus.SUCCEEDED:
             return
-        if accept_contact_stall:
+        if accept_grasp_stall:
             try:
                 joint = self._current_joint_positions()[names[0]]
             except (DemoError, KeyError):
                 joint = -math.inf
             if (joint >= self._minimum_gripper_closed_joint and
-                    self._bilateral_contact_current()):
+                    self._grasp_confirmation_current()):
                 rospy.loginfo(
-                    "AG95 contact stall accepted at %.4f rad", joint)
+                    "AG95 confirmed grasp stall accepted at %.4f rad", joint)
                 return
         raise DemoError(
             "%s controller action failed: state=%s status=%s" %
@@ -1099,29 +1093,28 @@ class AirGroundPickDemo:
         group.stop()
         return self._verify_tcp_pose(target, label)
 
-    def _bilateral_contact_current(self, now=None):
+    def _grasp_confirmation_current(self, now=None):
         snapshot = self._manipulation_snapshot()
-        left = snapshot[4]
-        right = snapshot[5]
+        confirmed = snapshot[4]
+        received = snapshot[5]
         current = time.monotonic() if now is None else now
         return bool(
-            left is not None and right is not None and
-            current - left <= self._contact_max_age and
-            current - right <= self._contact_max_age)
+            confirmed and received is not None and current >= received and
+            current - received <= self._grasp_confirmation_max_age)
 
-    def _wait_bilateral_contact(self):
-        deadline = time.monotonic() + self._contact_timeout
+    def _wait_grasp_confirmation(self):
+        deadline = time.monotonic() + self._grasp_confirmation_timeout
         while not rospy.is_shutdown() and time.monotonic() < deadline:
-            if self._bilateral_contact_current():
+            if self._grasp_confirmation_current():
                 return
             self._wait_step()
-        raise DemoError("AG95 did not establish bilateral target contact")
+        raise DemoError("AG95 grasp was not confirmed")
 
-    def _hold_bilateral_contact(self):
+    def _hold_grasp_confirmation(self):
         deadline = time.monotonic() + self._retention_hold
         while not rospy.is_shutdown() and time.monotonic() < deadline:
-            if not self._bilateral_contact_current():
-                raise DemoError("AG95 lost bilateral contact during lift hold")
+            if not self._grasp_confirmation_current():
+                raise DemoError("AG95 lost grasp confirmation during lift")
             self._wait_step()
 
     def _close_gripper(self):
@@ -1129,8 +1122,8 @@ class AirGroundPickDemo:
             self._gripper_client, ("left_outer_knuckle_joint",),
             (self._gripper_closed_position,), self._gripper_motion_time,
             self._gripper_action_timeout, "AG95 close",
-            accept_contact_stall=True)
-        self._wait_bilateral_contact()
+            accept_grasp_stall=True)
+        self._wait_grasp_confirmation()
         positions = self._current_joint_positions()
         if positions.get("left_outer_knuckle_joint", -math.inf) < \
                 self._minimum_gripper_closed_joint:
@@ -1162,9 +1155,9 @@ class AirGroundPickDemo:
             lift_actual.pose.position.z - grasp_actual.pose.position.z)
         if measured_lift < self._minimum_lift:
             raise DemoError("AUBO TCP did not complete the minimum lift")
-        self._hold_bilateral_contact()
+        self._hold_grasp_confirmation()
         self._publish_status(
-            "LIFT", tcp_lift=measured_lift, bilateral_contact=True,
+            "LIFT", tcp_lift=measured_lift, grasp_confirmed=True,
             target_world=list(target))
 
     def _safe_land(self):

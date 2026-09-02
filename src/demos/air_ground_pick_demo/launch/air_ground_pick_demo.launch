@@ -26,6 +26,18 @@
   <include
     file="$(find air_ground_pick_demo)/launch/target_observers.launch"/>
 
+  <node name="gazebo_grasp_confirmation"
+        pkg="ground_manipulator_runtime"
+        type="gazebo_grasp_confirmation.py" output="screen" required="true">
+    <param name="contact_topic" value="/pick_target/contacts"/>
+    <param name="joint_state_topic" value="/ground/joint_states"/>
+    <param name="output_topic"
+           value="/ground/gripper/grasp_confirmed"/>
+    <param name="contact_max_age" value="0.30"/>
+    <param name="joint_max_age" value="0.50"/>
+    <param name="minimum_closed_joint" value="0.20"/>
+  </node>
+
   <node name="spawn_pick_target" pkg="air_ground_pick_demo"
         type="spawn_pick_target.py" output="screen">
     <param name="runtime_ready_topic" value="/ground/runtime_ready"/>

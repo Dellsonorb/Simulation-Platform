@@ -17,6 +17,7 @@
   <exec_depend>gazebo_ros</exec_depend>
   <exec_depend>gazebo_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>ground_manipulator_runtime</exec_depend>
   <exec_depend>message_filters</exec_depend>
   <exec_depend>moveit_commander</exec_depend>
   <exec_depend>moveit_msgs</exec_depend>

@@ -1,4 +1,4 @@
-"""Minimal geometry and physical-contact helpers for an AG95 top grasp."""
+"""Minimal backend-neutral geometry helpers for an AG95 top grasp."""
 
 import math
 from collections import namedtuple
@@ -120,32 +120,6 @@ def generate_top_down_grasp(
         (x, y, grasp_z + pregrasp_offset), orientation)
     lift = CartesianPose((x, y, grasp_z + lift_offset), orientation)
     return GraspPoses(pregrasp, grasp, lift)
-
-
-def contact_sides(
-        contact_pairs, target_marker="pick_target",
-        left_pad_marker="left_finger_pad",
-        right_pad_marker="right_finger_pad"):
-    """Classify target collision pairs by the physical AG95 pad involved."""
-    left = False
-    right = False
-    for pair in contact_pairs:
-        try:
-            first, second = pair
-        except (TypeError, ValueError) as error:
-            raise GraspError("contact pair must contain two collision names") \
-                from error
-        first = str(first)
-        second = str(second)
-        if target_marker in first:
-            other = second
-        elif target_marker in second:
-            other = first
-        else:
-            continue
-        left = left or left_pad_marker in other
-        right = right or right_pad_marker in other
-    return left, right
 
 
 def zero_terminal_motion(trajectory):

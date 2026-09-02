@@ -23,6 +23,8 @@ PERCEPTION = (
 FLIGHT = PACKAGE / "src/air_ground_pick_demo/flight.py"
 APPROACH = PACKAGE / "src/air_ground_pick_demo/approach.py"
 GRASP = PACKAGE / "src/air_ground_pick_demo/grasp.py"
+GROUND_RUNTIME = ROOT / "src/platform/ground_manipulator_runtime"
+GRASP_ADAPTER = GROUND_RUNTIME / "scripts/gazebo_grasp_confirmation.py"
 TARGET_MODEL = PACKAGE / "models/pick_target/model.sdf"
 TARGET_CONFIG = PACKAGE / "models/pick_target/model.config"
 OBSERVER = PACKAGE / "scripts/red_target_observer.py"
@@ -65,8 +67,8 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
             item.text for tag in ("build_depend", "exec_depend")
             for item in root.findall(tag)}
         for required in (
-                "cv_bridge", "geometry_msgs", "message_filters", "rospy",
-                "sensor_msgs", "tf2_ros"):
+                "cv_bridge", "geometry_msgs", "ground_manipulator_runtime",
+                "message_filters", "rospy", "sensor_msgs", "tf2_ros"):
             self.assertIn(required, dependencies)
         cmake = CMAKE.read_text(encoding="utf-8")
         self.assertIn("catkin_python_setup", cmake)
@@ -509,21 +511,10 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
                 finger_pad_lower_edge_offset=0.0156,
                 contact_overlap=0.090, surface_clearance=0.010)
 
-    def test_contact_classification_requires_target_on_both_real_pads(self):
-        grasp = _load_module(
-            GRASP, "air_ground_pick_grasp_contact_test_target")
-        target = "pick_target::pick_target_link::pick_target_collision"
-        left = "ground_robot::ground/left_finger_pad::collision"
-        right = "ground_robot::ground/right_finger_pad::collision"
-        ground = "ground_plane::link::collision"
-        self.assertEqual(
-            (True, True), grasp.contact_sides(
-                ((target, left), (right, target), (target, ground))))
-        self.assertEqual(
-            (True, False), grasp.contact_sides(((left, target),)))
-        self.assertEqual(
-            (False, False), grasp.contact_sides(
-                ((left, right), (target, ground))))
+    def test_upper_grasp_math_has_no_backend_contact_semantics(self):
+        source = GRASP.read_text(encoding="utf-8")
+        self.assertNotIn("contact_sides", source)
+        self.assertNotIn("collision", source.lower())
 
     def test_cartesian_trajectory_ends_at_rest(self):
         grasp = _load_module(
@@ -554,7 +545,9 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         self.assertEqual("/ground/joint_states", config["joint_state_topic"])
         self.assertEqual(
             "/ground_observer/target_pose", config["ground_pose_topic"])
-        self.assertEqual("/pick_target/contacts", config["contact_topic"])
+        self.assertEqual(
+            "/ground/gripper/grasp_confirmed",
+            config["grasp_confirmed_topic"])
         self.assertEqual(
             ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
              "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"],
@@ -617,6 +610,10 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
             (PACKAGE / "scripts/air_ground_pick_demo.py").exists())
         self.assertEqual("$(arg run_demo)", orchestrator.get("if"))
         self.assertIn("demo.yaml", orchestrator.find("rosparam").get("file"))
+        adapter = next(node for node in nodes
+                       if node.get("name") == "gazebo_grasp_confirmation")
+        self.assertEqual("ground_manipulator_runtime", adapter.get("pkg"))
+        self.assertEqual("gazebo_grasp_confirmation.py", adapter.get("type"))
         launch_text = DEMO_LAUNCH.read_text(encoding="utf-8").lower()
         self.assertNotIn("brick_pick", launch_text)
         self.assertNotIn("attachment", launch_text)
@@ -642,11 +639,11 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         for required in (
                 "MoveGroupCommander", "FollowJointTrajectoryAction",
                 "FollowJointTrajectoryGoal", "JointTrajectoryPoint",
-                "ContactsState", "RobotState", "contact_sides",
+                "Bool", "RobotState", "_grasp_confirmation_current",
                 "generate_top_down_grasp",
                 "GROUND_OBSERVE", "GROUND_REFINED", "PREGRASP", "GRASP",
                 "LIFT", "compute_cartesian_path", "set_pose_target",
-                "bilateral"):
+                "grasp_confirmed"):
             self.assertIn(required, source)
         self.assertIn("zero_terminal_motion", source)
         self.assertIn("max_joint_speed", source)
@@ -666,13 +663,14 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         self.assertIn(
             "self._planning_orientation_tolerance", initialize_moveit)
         cartesian = source[source.index("    def _execute_cartesian("):
-                           source.index("    def _bilateral_contact_current(")]
+                           source.index("    def _grasp_confirmation_current(")]
         self.assertIn("_robot_state_from_joint_feedback()", cartesian)
         self.assertNotIn("get_current_state", cartesian)
         lowered = source.lower()
         for forbidden in (
                 "/gazebo/model", "getmodelstate", "setmodelstate",
-                "teleport", "attach", "brick_pick"):
+                "teleport", "attach", "brick_pick", "contactsstate",
+                "contact_sides", "collision", "bilateral"):
             self.assertNotIn(forbidden, lowered)
 
     def test_orchestrator_uses_runtime_interfaces_without_gt_or_teleport(self):
@@ -787,7 +785,7 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         events[11]["observation_stamp"] = 11.9
         events[15].update({
             "tcp_lift": 0.14,
-            "bilateral_contact": True,
+            "grasp_confirmed": True,
         })
         return events
 
@@ -819,9 +817,7 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
                 minimum_tcp_lift=0.10)
 
         monitor = checker.DemoMonitor(
-            rospy=None, goal_succeeded=3,
-            contact_sides=lambda _pairs: (False, False),
-            target_model="pick_target")
+            rospy=None, goal_succeeded=3, target_model="pick_target")
         message = type("Status", (), {})()
         message.data = json.dumps(events[0])
         monitor.status(message)
@@ -876,10 +872,10 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
                 after_stamp=12.0, minimum_successes=3)
 
         self.assertEqual(
-            {"bilateral_contact": True},
-            checker.bilateral_contact_summary(True))
+            {"grasp_confirmed": True},
+            checker.grasp_confirmation_summary(True))
         with self.assertRaises(checker.DemoCheckError):
-            checker.bilateral_contact_summary(False)
+            checker.grasp_confirmation_summary(False)
 
         lift = checker.target_lift_summary(
             baseline_z=0.0575, final_z=0.1775, minimum_lift=0.10)
