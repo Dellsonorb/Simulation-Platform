@@ -52,19 +52,28 @@ class ConfigurationTest(unittest.TestCase):
         self.assertIn('model_->SetWorldPose(pose_);', text)
         self.assertNotIn('link_offsets_', text)
 
-    def test_move_base_uses_odom_and_non_holonomic_local_planner(self):
+    def test_move_base_uses_shared_frames_and_non_holonomic_local_planner(self):
         with open(os.path.join(PACKAGE, 'config', 'costmap_common.yaml')) as stream:
             common = yaml.safe_load(stream)
         with open(os.path.join(PACKAGE, 'config', 'move_base.yaml')) as stream:
             move_base = yaml.safe_load(stream)
         with open(os.path.join(PACKAGE, 'config', 'local_planner.yaml')) as stream:
             local = yaml.safe_load(stream)['DWAPlannerROS']
-        self.assertEqual(common['global_frame'], 'odom')
-        self.assertEqual(common['robot_base_frame'], 'base_link')
+        with open(os.path.join(PACKAGE, 'config',
+                               'global_costmap.yaml')) as stream:
+            global_map = yaml.safe_load(stream)['global_costmap']
+        with open(os.path.join(PACKAGE, 'config',
+                               'local_costmap.yaml')) as stream:
+            local_map = yaml.safe_load(stream)['local_costmap']
+        self.assertNotIn('global_frame', common)
+        self.assertEqual(common['robot_base_frame'], 'ground/base_link')
+        self.assertEqual(global_map['global_frame'], 'map')
+        self.assertEqual(local_map['global_frame'], 'ground/odom')
         self.assertEqual(move_base['base_global_planner'], 'navfn/NavfnROS')
         self.assertEqual(move_base['base_local_planner'],
                          'dwa_local_planner/DWAPlannerROS')
         self.assertFalse(local['holonomic_robot'])
+        self.assertEqual(local['odom_topic'], '/ground/odom')
 
     def test_rviz_exposes_2d_navigation_goal_tool(self):
         with open(os.path.join(PACKAGE, 'rviz', 'navigation.rviz')) as stream:
@@ -114,7 +123,8 @@ class ConfigurationTest(unittest.TestCase):
         self.assertEqual(common['obstacle_layer']['observation_sources'],
                          'scan')
         scan = common['obstacle_layer']['scan']
-        self.assertEqual(scan['topic'], '/scan')
+        self.assertEqual(scan['topic'], '/ground/scan')
+        self.assertEqual(scan['sensor_frame'], 'ground/lidar_2d_link')
         self.assertEqual(scan['data_type'], 'LaserScan')
         self.assertTrue(scan['marking'])
         self.assertTrue(scan['clearing'])

@@ -1,13 +1,12 @@
-global_frame: odom
-robot_base_frame: base_link
+robot_base_frame: ground/base_link
 transform_tolerance: 0.3
 footprint: [[-0.50, -0.37], [-0.50, 0.37], [0.50, 0.37], [0.50, -0.37]]
 footprint_padding: 0.02
 obstacle_layer:
   observation_sources: scan
   scan:
-    topic: /scan
-    sensor_frame: navigation_laser_link
+    topic: /ground/scan
+    sensor_frame: ground/lidar_2d_link
     data_type: LaserScan
     marking: true
     clearing: true

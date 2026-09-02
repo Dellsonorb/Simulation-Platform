@@ -1,4 +1,5 @@
 DWAPlannerROS:
+  odom_topic: /ground/odom
   holonomic_robot: false
   max_vel_x: 0.40
   min_vel_x: -0.20

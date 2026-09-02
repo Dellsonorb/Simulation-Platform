@@ -1,4 +1,5 @@
 local_costmap:
+  global_frame: ground/odom
   update_frequency: 10.0
   publish_frequency: 5.0
   rolling_window: true

@@ -2,7 +2,7 @@
 <package format="2">
   <name>bunker_navigation</name>
   <version>0.1.0</version>
-  <description>Ground-only move_base navigation for the BUNKER Gazebo model.</description>
+  <description>SIM/REAL-common move_base navigation for BUNKER.</description>
   <maintainer email="lu@example.com">lu</maintainer>
   <license>BSD-3-Clause</license>
 
@@ -10,34 +10,27 @@
   <build_depend>geometry_msgs</build_depend>
   <build_depend>actionlib</build_depend>
   <build_depend>actionlib_msgs</build_depend>
-  <build_depend>gazebo_msgs</build_depend>
-  <build_depend>gazebo_dev</build_depend>
-  <build_depend>gazebo_ros</build_depend>
   <build_depend>move_base_msgs</build_depend>
   <build_depend>nav_msgs</build_depend>
   <build_depend>rospy</build_depend>
-  <build_depend>roscpp</build_depend>
   <build_depend>std_msgs</build_depend>
+  <build_depend>std_srvs</build_depend>
   <build_depend>tf</build_depend>
+  <build_depend>visualization_msgs</build_depend>
 
   <exec_depend>base_local_planner</exec_depend>
   <exec_depend>costmap_2d</exec_depend>
   <exec_depend>dwa_local_planner</exec_depend>
   <exec_depend>actionlib</exec_depend>
   <exec_depend>actionlib_msgs</exec_depend>
-  <exec_depend>bunker_aubo_gazebo</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
-  <exec_depend>joint_state_publisher</exec_depend>
-  <exec_depend>gazebo_msgs</exec_depend>
-  <exec_depend>gazebo_ros</exec_depend>
   <exec_depend>move_base</exec_depend>
   <exec_depend>move_base_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>navfn</exec_depend>
   <exec_depend>rospy</exec_depend>
-  <exec_depend>roscpp</exec_depend>
-  <exec_depend>rviz</exec_depend>
   <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
   <exec_depend>tf</exec_depend>
   <exec_depend>visualization_msgs</exec_depend>
 

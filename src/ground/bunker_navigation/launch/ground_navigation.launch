@@ -1,0 +1,26 @@
+<launch>
+  <!-- Common SIM/REAL navigation. The selected backend owns cmd_vel/odom/TF. -->
+  <group ns="ground">
+    <node name="move_base" pkg="move_base" type="move_base"
+          required="true" output="screen">
+      <remap from="cmd_vel" to="nav_cmd_vel"/>
+      <rosparam command="load"
+                file="$(find bunker_navigation)/config/move_base.yaml"/>
+      <rosparam command="load"
+                file="$(find bunker_navigation)/config/costmap_common.yaml"
+                ns="global_costmap"/>
+      <rosparam command="load"
+                file="$(find bunker_navigation)/config/costmap_common.yaml"
+                ns="local_costmap"/>
+      <rosparam command="load"
+                file="$(find bunker_navigation)/config/global_costmap.yaml"/>
+      <rosparam command="load"
+                file="$(find bunker_navigation)/config/local_costmap.yaml"/>
+      <rosparam command="load"
+                file="$(find bunker_navigation)/config/local_planner.yaml"/>
+    </node>
+
+    <node name="runtime_stop" pkg="bunker_navigation"
+          type="ground_stop_server.py" required="true" output="screen"/>
+  </group>
+</launch>
