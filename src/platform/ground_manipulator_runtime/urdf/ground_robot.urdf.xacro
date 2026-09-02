@@ -69,8 +69,9 @@
     <plugin name="bunker_planar_move"
             filename="libbunker_planar_move_plugin.so">
       <robotNamespace>/ground</robotNamespace>
-      <commandTopic>cmd_vel_safe</commandTopic>
+      <commandTopic>cmd_vel</commandTopic>
       <odometryTopic>odom</odometryTopic>
+      <statusTopic>bunker_status</statusTopic>
       <odometryFrame>ground/odom</odometryFrame>
       <robotBaseFrame>ground/base_link</robotBaseFrame>
       <odometryRate>50.0</odometryRate>

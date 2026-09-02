@@ -75,8 +75,11 @@ class RendererTest(unittest.TestCase):
             "libbunker_planar_move_plugin.so",
             plugins["bunker_planar_move"].get("filename"))
         self.assertEqual(
-            "cmd_vel_safe",
+            "cmd_vel",
             plugins["bunker_planar_move"].findtext("commandTopic"))
+        self.assertEqual(
+            "bunker_status",
+            plugins["bunker_planar_move"].findtext("statusTopic"))
         self.assertEqual("odom", plugins["bunker_planar_move"].findtext(
             "odometryFrame"))
         self.assertEqual(

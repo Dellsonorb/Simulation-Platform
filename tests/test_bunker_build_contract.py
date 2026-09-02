@@ -48,7 +48,7 @@ class BunkerRuntimePackageTest(unittest.TestCase):
             item.text for tag in ("depend", "exec_depend")
             for item in package.findall(tag)}
         self.assertTrue({
-            "bunker_description", "gazebo_plugins", "gazebo_ros",
+            "bunker_description", "bunker_msgs", "gazebo_plugins", "gazebo_ros",
             "geometry_msgs", "nav_msgs", "robot_state_publisher", "rospy",
             "sensor_msgs", "tf2_ros", "xacro",
         }.issubset(runtime_dependencies))
@@ -90,6 +90,19 @@ class BunkerRuntimePackageTest(unittest.TestCase):
         self.assertIn("GetLink(StripLeadingSlash(robot_base_frame_))", source)
         self.assertIn("base_link_->SetLinearVel", source)
         self.assertIn("base_link_->SetAngularVel", source)
+        self.assertIn("bunker_msgs::BunkerStatus", source)
+        self.assertIn("status_publisher_", source)
+        self.assertIn('"commandTopic", "cmd_vel"', source)
+        self.assertIn('"statusTopic", "bunker_status"', source)
+        self.assertIn("odometry_x_", source)
+        self.assertIn("odometry_y_", source)
+        self.assertIn("odometry_yaw_", source)
+        publish_body = source.split("void PublishOdometry", 1)[1]
+        self.assertNotIn("WorldPose", publish_body)
+        self.assertNotIn("pose.Pos()", publish_body)
+        self.assertNotIn("pose.Rot()", publish_body)
+        self.assertIn("bunker_msgs", (
+            RUNTIME / "CMakeLists.txt").read_text(encoding="utf-8"))
         self.assertNotIn("model_->SetLinearVel", source)
         self.assertNotIn("model_->SetAngularVel", source)
         self.assertNotIn("model_->SetWorldTwist", source)

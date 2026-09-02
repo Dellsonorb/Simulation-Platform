@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(catkin REQUIRED COMPONENTS
+  bunker_msgs
   gazebo_dev
   geometry_msgs
   nav_msgs
@@ -15,12 +16,13 @@ find_package(gazebo REQUIRED)
 catkin_python_setup()
 catkin_package(
   LIBRARIES bunker_planar_move_plugin
-  CATKIN_DEPENDS gazebo_dev geometry_msgs nav_msgs roscpp tf2_ros
+  CATKIN_DEPENDS bunker_msgs gazebo_dev geometry_msgs nav_msgs roscpp tf2_ros
 )
 
 add_library(bunker_planar_move_plugin SHARED
   src/bunker_planar_move_plugin.cpp
 )
+add_dependencies(bunker_planar_move_plugin ${catkin_EXPORTED_TARGETS})
 target_include_directories(bunker_planar_move_plugin PRIVATE
   ${catkin_INCLUDE_DIRS}
   ${GAZEBO_INCLUDE_DIRS}

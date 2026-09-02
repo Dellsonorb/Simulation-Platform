@@ -62,8 +62,9 @@ LIDAR_GAZEBO_XML = """<gazebo reference="lidar_2d_link">
 PLANAR_GAZEBO_XML = """<gazebo>
   <plugin name="bunker_planar_move" filename="libbunker_planar_move_plugin.so">
     <robotNamespace>/ground</robotNamespace>
-    <commandTopic>cmd_vel_safe</commandTopic>
+    <commandTopic>cmd_vel</commandTopic>
     <odometryTopic>odom</odometryTopic>
+    <statusTopic>bunker_status</statusTopic>
     <odometryFrame>odom</odometryFrame>
     <robotBaseFrame>base_link</robotBaseFrame>
     <odometryRate>50.0</odometryRate>

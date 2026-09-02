@@ -251,8 +251,9 @@ def validate_runtime_tree(root):
     planar = _require_plugin(root, "libbunker_planar_move_plugin.so")
     if (
         planar.findtext("robotNamespace") != "/ground" or
-        planar.findtext("commandTopic") != "cmd_vel_safe" or
+        planar.findtext("commandTopic") != "cmd_vel" or
         planar.findtext("odometryTopic") != "odom" or
+        planar.findtext("statusTopic") != "bunker_status" or
         planar.findtext("odometryFrame") != "ground/odom" or
         planar.findtext("robotBaseFrame") != "ground/base_link"
     ):

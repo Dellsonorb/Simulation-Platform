@@ -707,6 +707,9 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
             "libgazebo_ros_camera.so",
             "libgazebo_ros_openni_kinect.so",
         }, plugin_libraries)
+        planar = root.find(".//plugin[@name='bunker_planar_move']")
+        self.assertEqual("cmd_vel", planar.findtext("commandTopic"))
+        self.assertEqual("bunker_status", planar.findtext("statusTopic"))
         self.assertEqual(
             {"bunker_lidar_2d", "ground_d435_color", "ground_d435_depth"},
             {sensor.get("name") for sensor in root.findall(".//sensor")})

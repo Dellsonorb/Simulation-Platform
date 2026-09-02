@@ -12,6 +12,7 @@
 #include <thread>
 
 #include <boost/bind/bind.hpp>
+#include <bunker_msgs/BunkerStatus.h>
 #include <gazebo/common/Events.hh>
 #include <gazebo/common/Plugin.hh>
 #include <gazebo/physics/physics.hh>
@@ -58,9 +59,11 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
     robot_namespace_ = ReadParameter<std::string>(
         sdf, "robotNamespace", "/ground");
     command_topic_ = ReadParameter<std::string>(
-        sdf, "commandTopic", "cmd_vel_safe");
+        sdf, "commandTopic", "cmd_vel");
     odometry_topic_ = ReadParameter<std::string>(
         sdf, "odometryTopic", "odom");
+    status_topic_ = ReadParameter<std::string>(
+        sdf, "statusTopic", "bunker_status");
     odometry_frame_ = ReadParameter<std::string>(
         sdf, "odometryFrame", "odom");
     robot_base_frame_ = ReadParameter<std::string>(
@@ -91,8 +94,11 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
     command_subscriber_ = node_->subscribe(options);
     odometry_publisher_ = node_->advertise<nav_msgs::Odometry>(
         odometry_topic_, 1);
+    status_publisher_ = node_->advertise<bunker_msgs::BunkerStatus>(
+        status_topic_, 1);
 
     last_command_time_ = ros::Time::now();
+    last_update_time_ = world_->SimTime();
     last_publish_time_ = world_->SimTime();
     running_.store(true);
     callback_thread_ = std::thread(
@@ -116,6 +122,7 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
       callback_thread_.join();
     }
     odometry_publisher_.shutdown();
+    status_publisher_.shutdown();
     tf_broadcaster_.reset();
     node_.reset();
     base_link_.reset();
@@ -171,15 +178,30 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
         0.0, 0.0, command.angular.z));
 
     const common::Time now = world_->SimTime();
+    const double elapsed = (now - last_update_time_).Double();
+    last_update_time_ = now;
+    const ignition::math::Vector3d world_linear = base_link_->WorldLinearVel();
+    const ignition::math::Vector3d world_angular = base_link_->WorldAngularVel();
+    const double linear_velocity =
+        world_linear.X() * std::cos(yaw) + world_linear.Y() * std::sin(yaw);
+    const double angular_velocity = world_angular.Z();
+    if (elapsed < 0.0) {
+      odometry_x_ = 0.0;
+      odometry_y_ = 0.0;
+      odometry_yaw_ = 0.0;
+    } else if (elapsed > 0.0) {
+      odometry_x_ += linear_velocity * std::cos(odometry_yaw_) * elapsed;
+      odometry_y_ += linear_velocity * std::sin(odometry_yaw_) * elapsed;
+      odometry_yaw_ += angular_velocity * elapsed;
+    }
     if ((now - last_publish_time_).Double() < 1.0 / odometry_rate_) {
       return;
     }
     last_publish_time_ = now;
-    PublishOdometry(pose, command);
+    PublishOdometry(linear_velocity, angular_velocity);
   }
 
-  void PublishOdometry(const ignition::math::Pose3d& pose,
-                       const geometry_msgs::Twist& command) {
+  void PublishOdometry(double linear_velocity, double angular_velocity) {
     const ros::Time stamp = ros::Time::now();
     const std::string odometry_frame = ResolveFrame(odometry_frame_);
     const std::string base_frame = ResolveFrame(robot_base_frame_);
@@ -188,14 +210,13 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
     odometry.header.stamp = stamp;
     odometry.header.frame_id = odometry_frame;
     odometry.child_frame_id = base_frame;
-    odometry.pose.pose.position.x = pose.Pos().X();
-    odometry.pose.pose.position.y = pose.Pos().Y();
-    odometry.pose.pose.position.z = pose.Pos().Z();
-    odometry.pose.pose.orientation.x = pose.Rot().X();
-    odometry.pose.pose.orientation.y = pose.Rot().Y();
-    odometry.pose.pose.orientation.z = pose.Rot().Z();
-    odometry.pose.pose.orientation.w = pose.Rot().W();
-    odometry.twist.twist = command;
+    odometry.pose.pose.position.x = odometry_x_;
+    odometry.pose.pose.position.y = odometry_y_;
+    odometry.pose.pose.position.z = 0.0;
+    odometry.pose.pose.orientation.z = std::sin(odometry_yaw_ / 2.0);
+    odometry.pose.pose.orientation.w = std::cos(odometry_yaw_ / 2.0);
+    odometry.twist.twist.linear.x = linear_velocity;
+    odometry.twist.twist.angular.z = angular_velocity;
     odometry.pose.covariance[0] = 1e-5;
     odometry.pose.covariance[7] = 1e-5;
     odometry.pose.covariance[35] = 1e-3;
@@ -204,11 +225,22 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
     geometry_msgs::TransformStamped transform;
     transform.header = odometry.header;
     transform.child_frame_id = base_frame;
-    transform.transform.translation.x = pose.Pos().X();
-    transform.transform.translation.y = pose.Pos().Y();
-    transform.transform.translation.z = pose.Pos().Z();
+    transform.transform.translation.x = odometry_x_;
+    transform.transform.translation.y = odometry_y_;
+    transform.transform.translation.z = 0.0;
     transform.transform.rotation = odometry.pose.pose.orientation;
     tf_broadcaster_->sendTransform(transform);
+
+    bunker_msgs::BunkerStatus status;
+    status.header.stamp = stamp;
+    status.header.frame_id = base_frame;
+    status.linear_velocity = linear_velocity;
+    status.angular_velocity = angular_velocity;
+    status.base_state = 0;
+    status.control_mode = 0;
+    status.fault_code = 0;
+    status.battery_voltage = 0.0;
+    status_publisher_.publish(status);
   }
 
   physics::ModelPtr model_;
@@ -219,6 +251,7 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   ros::Subscriber command_subscriber_;
   ros::Publisher odometry_publisher_;
+  ros::Publisher status_publisher_;
   ros::CallbackQueue callback_queue_;
   std::thread callback_thread_;
   std::atomic<bool> running_{false};
@@ -226,14 +259,19 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
   geometry_msgs::Twist command_;
   ros::Time last_command_time_;
   common::Time last_publish_time_;
+  common::Time last_update_time_;
   std::string robot_namespace_;
   std::string command_topic_;
   std::string odometry_topic_;
+  std::string status_topic_;
   std::string odometry_frame_;
   std::string robot_base_frame_;
   std::string tf_prefix_;
   double odometry_rate_{50.0};
   double command_timeout_{0.5};
+  double odometry_x_{0.0};
+  double odometry_y_{0.0};
+  double odometry_yaw_{0.0};
 };
 
 GZ_REGISTER_MODEL_PLUGIN(BunkerPlanarMovePlugin)

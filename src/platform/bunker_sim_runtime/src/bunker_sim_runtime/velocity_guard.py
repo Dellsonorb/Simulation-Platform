@@ -4,6 +4,20 @@ import math
 ZERO = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 
+def command_is_fresh(received_at, now, timeout):
+    try:
+        received_at = float(received_at)
+        now = float(now)
+        timeout = float(timeout)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if not all(math.isfinite(value) for value in (
+            received_at, now, timeout)) or timeout <= 0.0:
+        return False
+    age = now - received_at
+    return 0.0 <= age <= timeout
+
+
 def admit_components(linear_x, linear_y, linear_z,
                      angular_x, angular_y, angular_z,
                      epsilon=1e-9):

@@ -6,6 +6,7 @@
   <maintainer email="sim-platform@example.invalid">Simulation Platform Maintainers</maintainer>
   <license>BSD-3-Clause</license>
   <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>bunker_msgs</build_depend>
   <build_depend>gazebo_dev</build_depend>
   <build_depend>gazebo_ros</build_depend>
   <build_depend>geometry_msgs</build_depend>
@@ -13,12 +14,14 @@
   <build_depend>roscpp</build_depend>
   <build_depend>tf2_ros</build_depend>
   <build_export_depend>gazebo_dev</build_export_depend>
+  <build_export_depend>bunker_msgs</build_export_depend>
   <build_export_depend>gazebo_ros</build_export_depend>
   <build_export_depend>geometry_msgs</build_export_depend>
   <build_export_depend>nav_msgs</build_export_depend>
   <build_export_depend>roscpp</build_export_depend>
   <build_export_depend>tf2_ros</build_export_depend>
   <exec_depend>bunker_description</exec_depend>
+  <exec_depend>bunker_msgs</exec_depend>
   <exec_depend>gazebo_plugins</exec_depend>
   <exec_depend>gazebo_ros</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
