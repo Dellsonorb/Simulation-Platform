@@ -77,7 +77,7 @@ IMU_GAZEBO_XML = """<gazebo reference="imu_link">
       <gaussianNoise>0.002</gaussianNoise>
       <xyzOffset>0 0 0</xyzOffset>
       <rpyOffset>0 0 0</rpyOffset>
-      <frameName>imu_link</frameName>
+      <frameName>ground/imu_link</frameName>
       <initialOrientationAsReference>false</initialOrientationAsReference>
     </plugin>
   </sensor>

@@ -63,6 +63,18 @@ class CommonNavigationTest(unittest.TestCase):
         self.assertEqual("/ground/odom", planner["odom_topic"])
         self.assertFalse(planner["holonomic_robot"])
 
+    def test_local_planner_can_finish_a_short_reverse_approach_and_turn(self):
+        planner = yaml.safe_load((
+            PACKAGE / "config/local_planner.yaml").read_text(
+                encoding="utf-8"))["DWAPlannerROS"]
+
+        # The manipulation standoff is a short reverse move followed by a
+        # 180-degree final heading.  A forward scoring point makes DWA orbit
+        # that nearby goal instead of entering its rotate-to-goal behavior.
+        self.assertEqual(0.0, planner["forward_point_distance"])
+        self.assertEqual(0.0, planner["min_vel_trans"])
+        self.assertEqual(0.025, planner["xy_goal_tolerance"])
+
     def test_stop_helper_cancels_navigation_and_publishes_zero(self):
         sys.path.insert(0, str(SOURCE_ROOT))
         try:

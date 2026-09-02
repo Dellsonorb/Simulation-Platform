@@ -137,7 +137,7 @@ def wait_for_connection(rospy, publisher, timeout):
     deadline = time.monotonic() + timeout
     while publisher.get_num_connections() == 0:
         if rospy.is_shutdown() or time.monotonic() >= deadline:
-            raise RuntimeCheckError("/ground/cmd_vel has no subscriber")
+            raise RuntimeCheckError("/ground/nav_cmd_vel has no subscriber")
         time.sleep(0.05)
 
 
@@ -273,7 +273,7 @@ def check_model(rospy, model_states_type, timeout):
 
 
 def check_motion(rospy, odometry_type, twist_type, timeout):
-    publisher = rospy.Publisher("/ground/cmd_vel", twist_type, queue_size=1)
+    publisher = rospy.Publisher("/ground/nav_cmd_vel", twist_type, queue_size=1)
     wait_for_connection(rospy, publisher, timeout)
 
     start_message = wait_for_message(rospy, "/ground/odom", odometry_type, timeout)

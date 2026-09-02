@@ -47,6 +47,23 @@ class ApproachTest(unittest.TestCase):
         self.assertAlmostEqual(
             0.75, approach.travel_distance((3.5, 0.0), (2.75, 0.0)))
 
+    def test_staged_goal_positions_before_turning_to_target(self):
+        approach = load_module()
+        positioning, final = approach.compute_staged_standoff_goals(
+            current_pose=(3.0, 0.0, 0.2),
+            target_xy=(2.0, 0.0), standoff=0.82)
+
+        self.assertEqual((final.x, final.y),
+                         (positioning.x, positioning.y))
+        self.assertAlmostEqual(0.2, positioning.yaw)
+        self.assertAlmostEqual(math.pi, abs(final.yaw))
+
+        heading = approach.compute_heading_goal(
+            current_pose=(2.84, 0.01, 0.2), target_xy=(2.0, 0.0))
+        self.assertEqual((2.84, 0.01), (heading.x, heading.y))
+        self.assertAlmostEqual(
+            math.atan2(-0.01, -0.84), heading.yaw)
+
     def test_degenerate_or_nonfinite_goal_is_rejected(self):
         approach = load_module()
         for current, target, standoff in (

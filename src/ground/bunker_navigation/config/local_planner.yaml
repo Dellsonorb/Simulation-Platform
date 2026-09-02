@@ -6,7 +6,7 @@ DWAPlannerROS:
   max_vel_y: 0.0
   min_vel_y: 0.0
   max_vel_trans: 0.40
-  min_vel_trans: 0.03
+  min_vel_trans: 0.0
   max_vel_theta: 1.0
   min_vel_theta: 0.4
   acc_lim_x: 0.60
@@ -24,3 +24,6 @@ DWAPlannerROS:
   path_distance_bias: 32.0
   goal_distance_bias: 20.0
   occdist_scale: 0.01
+  # The pick approach ends with a short reverse move and an in-place turn.
+  # A forward scoring point makes DWA orbit this nearby goal.
+  forward_point_distance: 0.0

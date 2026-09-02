@@ -28,7 +28,8 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 
 from air_ground_pick_demo.approach import (
     ApproachError,
-    compute_standoff_goal,
+    compute_heading_goal,
+    compute_staged_standoff_goals,
     motion_required,
     transform_is_fresh,
     travel_distance,
@@ -340,7 +341,9 @@ class AirGroundPickDemo:
         payload.update(details)
         self._status_pub.publish(String(data=json.dumps(
             payload, sort_keys=True, allow_nan=False)))
-        rospy.loginfo("[air_ground_pick_demo] %s", state)
+        rospy.loginfo(
+            "[air_ground_pick_demo] %s %s", state,
+            json.dumps(details, sort_keys=True, allow_nan=False))
 
     @staticmethod
     def _wait_step():
@@ -476,36 +479,52 @@ class AirGroundPickDemo:
                 raise DemoError("ground stop service unavailable") from error
             return False
 
+    def _execute_ground_goal(self, goal_geometry, label):
+        goal = MoveBaseGoal()
+        goal.target_pose.header.frame_id = self._map_frame
+        goal.target_pose.header.stamp = rospy.Time.now()
+        goal.target_pose.pose.position.x = goal_geometry.x
+        goal.target_pose.pose.position.y = goal_geometry.y
+        orientation = self._quaternion_from_yaw(goal_geometry.yaw)
+        (goal.target_pose.pose.orientation.x,
+         goal.target_pose.pose.orientation.y,
+         goal.target_pose.pose.orientation.z,
+         goal.target_pose.pose.orientation.w) = orientation
+        self._navigation_client.send_goal(goal)
+        if not self._navigation_client.wait_for_result(
+                rospy.Duration(self._navigation_timeout)):
+            self._navigation_client.cancel_goal()
+            raise DemoError(label + " action timed out")
+        if self._navigation_client.get_state() != GoalStatus.SUCCEEDED:
+            raise DemoError(
+                "%s failed: %s" %
+                (label, self._navigation_client.get_goal_status_text()))
+
     def _approach_ground(self, target_map):
-        self._publish_status("GROUND_APPROACH")
         start = self._ground_pose()
-        goal_geometry = compute_standoff_goal(
-            start[:2], target_map[:2], self._ground_standoff)
+        positioning_goal, final_goal = compute_staged_standoff_goals(
+            start, target_map[:2], self._ground_standoff)
+        self._publish_status(
+            "GROUND_APPROACH", start_map=list(start),
+            target_map=list(target_map),
+            navigation_goal_map=[
+                final_goal.x, final_goal.y, final_goal.yaw])
+        if not self._navigation_client.wait_for_server(
+                rospy.Duration(self._navigation_timeout)):
+            raise DemoError("ground navigation action is unavailable")
         if motion_required(
-                start[:2], (goal_geometry.x, goal_geometry.y),
+                start[:2], (positioning_goal.x, positioning_goal.y),
                 self._ground_goal_tolerance):
-            if not self._navigation_client.wait_for_server(
-                    rospy.Duration(self._navigation_timeout)):
-                raise DemoError("ground navigation action is unavailable")
-            goal = MoveBaseGoal()
-            goal.target_pose.header.frame_id = self._map_frame
-            goal.target_pose.header.stamp = rospy.Time.now()
-            goal.target_pose.pose.position.x = goal_geometry.x
-            goal.target_pose.pose.position.y = goal_geometry.y
-            orientation = self._quaternion_from_yaw(goal_geometry.yaw)
-            (goal.target_pose.pose.orientation.x,
-             goal.target_pose.pose.orientation.y,
-             goal.target_pose.pose.orientation.z,
-             goal.target_pose.pose.orientation.w) = orientation
-            self._navigation_client.send_goal(goal)
-            if not self._navigation_client.wait_for_result(
-                    rospy.Duration(self._navigation_timeout)):
-                self._navigation_client.cancel_goal()
-                raise DemoError("ground navigation action timed out")
-            if self._navigation_client.get_state() != GoalStatus.SUCCEEDED:
-                raise DemoError(
-                    "ground navigation failed: %s" %
-                    self._navigation_client.get_goal_status_text())
+            self._execute_ground_goal(
+                positioning_goal, "ground positioning")
+        heading_start = self._ground_pose()
+        heading_goal = compute_heading_goal(
+            heading_start, target_map[:2])
+        rospy.loginfo(
+            "ground heading goal keeps measured position [%.4f, %.4f]",
+            heading_goal.x, heading_goal.y)
+        self._execute_ground_goal(
+            heading_goal, "ground final heading")
         self._stop_ground(required=True)
         final = self._ground_pose()
         total_travel = travel_distance(start[:2], final[:2])
@@ -651,6 +670,9 @@ class AirGroundPickDemo:
             self._yaw_from_quaternion(pose.pose.orientation))
         if not all(math.isfinite(value) for value in target):
             raise DemoError("target pose is nonfinite")
+        return target
+
+    def _validate_near_field_target_height(self, target):
         expected_center_z = 0.5 * self._target_size[2]
         if abs(target[2] - expected_center_z) > \
                 self._target_center_height_tolerance:
@@ -659,7 +681,6 @@ class AirGroundPickDemo:
                 "measured=%.4f expected=%.4f tolerance=%.4f" %
                 (target[2], expected_center_z,
                  self._target_center_height_tolerance))
-        return target
 
     def _observe_ground_target(self):
         self._publish_status("GROUND_OBSERVE")
@@ -676,6 +697,7 @@ class AirGroundPickDemo:
                         self._ground_observation_max_age,
                         pose.header.frame_id, self._map_frame)):
                 target = self._target_from_pose(pose)
+                self._validate_near_field_target_height(target)
                 self._publish_status(
                     "GROUND_REFINED", target_map=list(target),
                     observation_stamp=pose.header.stamp.to_sec(),

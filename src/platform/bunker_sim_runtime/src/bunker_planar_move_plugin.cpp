@@ -74,6 +74,7 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
             << robot_base_frame_ << "\n";
       return;
     }
+    initial_base_pose_ = base_link_->WorldPose();
     odometry_rate_ = ReadParameter<double>(sdf, "odometryRate", 50.0);
     command_timeout_ = ReadParameter<double>(sdf, "cmdTimeout", 0.5);
     if (odometry_rate_ <= 0.0 || command_timeout_ < 0.0) {
@@ -168,8 +169,8 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
       return;
     }
     const geometry_msgs::Twist command = CurrentCommand();
-    const ignition::math::Pose3d pose = model_->WorldPose();
-    const double yaw = pose.Rot().Yaw();
+    const ignition::math::Pose3d base_pose = base_link_->WorldPose();
+    const double yaw = base_pose.Rot().Yaw();
     base_link_->SetLinearVel(ignition::math::Vector3d(
         command.linear.x * std::cos(yaw) - command.linear.y * std::sin(yaw),
         command.linear.y * std::cos(yaw) + command.linear.x * std::sin(yaw),
@@ -186,14 +187,13 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
         world_linear.X() * std::cos(yaw) + world_linear.Y() * std::sin(yaw);
     const double angular_velocity = world_angular.Z();
     if (elapsed < 0.0) {
-      odometry_x_ = 0.0;
-      odometry_y_ = 0.0;
-      odometry_yaw_ = 0.0;
-    } else if (elapsed > 0.0) {
-      odometry_x_ += linear_velocity * std::cos(odometry_yaw_) * elapsed;
-      odometry_y_ += linear_velocity * std::sin(odometry_yaw_) * elapsed;
-      odometry_yaw_ += angular_velocity * elapsed;
+      initial_base_pose_ = base_pose;
     }
+    const ignition::math::Pose3d relative_pose =
+        initial_base_pose_.Inverse() * base_pose;
+    odometry_x_ = relative_pose.Pos().X();
+    odometry_y_ = relative_pose.Pos().Y();
+    odometry_yaw_ = relative_pose.Rot().Yaw();
     if ((now - last_publish_time_).Double() < 1.0 / odometry_rate_) {
       return;
     }
@@ -246,6 +246,7 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
   physics::ModelPtr model_;
   physics::LinkPtr base_link_;
   physics::WorldPtr world_;
+  ignition::math::Pose3d initial_base_pose_;
   event::ConnectionPtr update_connection_;
   std::unique_ptr<ros::NodeHandle> node_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;

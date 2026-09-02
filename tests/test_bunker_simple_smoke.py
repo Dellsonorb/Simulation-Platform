@@ -129,6 +129,7 @@ class BunkerSimpleSmokeTest(unittest.TestCase):
 
     def test_checker_uses_map_and_covers_driver_compatible_sensor_topics(self):
         source = CHECKER.read_text(encoding="utf-8")
+        self.assertIn('Publisher("/ground/nav_cmd_vel"', source)
         self.assertIn('(\"map\", \"ground/base_link\")', source)
         self.assertIn('(\"ground/base_link\", \"ground/imu_link\")', source)
         self.assertIn('"/ground/imu/data"', source)

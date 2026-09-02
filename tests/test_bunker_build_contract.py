@@ -64,6 +64,10 @@ class BunkerRuntimePackageTest(unittest.TestCase):
         self.assertNotIn("test/test_contracts.py", cmake)
         self.assertNotIn("test/test_sim_time.py", cmake)
 
+    def test_legacy_combined_robot_default_world_is_installable(self):
+        package = ROOT / "src/ground/bunker_aubo_gazebo"
+        self.assertTrue((package / "worlds/empty.world").is_file())
+
     def test_preflight_barrier_modules_are_absent(self):
         self.assertFalse((RUNTIME / "scripts/spawn_bunker_preflight.py").exists())
         self.assertFalse(
@@ -97,6 +101,12 @@ class BunkerRuntimePackageTest(unittest.TestCase):
         self.assertIn("odometry_x_", source)
         self.assertIn("odometry_y_", source)
         self.assertIn("odometry_yaw_", source)
+        self.assertIn("base_link_->WorldPose()", source)
+        self.assertIn(
+            "initial_base_pose_.Inverse() * base_pose", source)
+        self.assertNotIn("odometry_x_ +=", source)
+        self.assertNotIn("odometry_y_ +=", source)
+        self.assertNotIn("odometry_yaw_ +=", source)
         publish_body = source.split("void PublishOdometry", 1)[1]
         self.assertNotIn("WorldPose", publish_body)
         self.assertNotIn("pose.Pos()", publish_body)

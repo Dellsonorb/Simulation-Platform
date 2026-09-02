@@ -33,6 +33,18 @@ def _positive(value, name):
     return result
 
 
+def _finite_pose(values, name):
+    try:
+        result = tuple(float(value) for value in values)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ApproachError(
+            "%s must contain three finite values" % name) from error
+    if (len(result) != 3 or
+            not all(math.isfinite(value) for value in result)):
+        raise ApproachError("%s must contain three finite values" % name)
+    return result
+
+
 def compute_standoff_goal(current_xy, target_xy, standoff):
     """Place the base on its current side of the target and face the target."""
     current_x, current_y = _finite_pair(current_xy, "current_xy")
@@ -48,6 +60,32 @@ def compute_standoff_goal(current_xy, target_xy, standoff):
     goal_y = target_y + standoff * from_target_y / distance
     yaw = math.atan2(target_y - goal_y, target_x - goal_x)
     return StandoffGoal(goal_x, goal_y, yaw, standoff)
+
+
+def compute_staged_standoff_goals(current_pose, target_xy, standoff):
+    """Return a precise positioning goal followed by the final heading."""
+    current_x, current_y, current_yaw = _finite_pose(
+        current_pose, "current_pose")
+    final = compute_standoff_goal(
+        (current_x, current_y), target_xy, standoff)
+    positioning = StandoffGoal(
+        final.x, final.y, current_yaw, final.target_distance)
+    return positioning, final
+
+
+def compute_heading_goal(current_pose, target_xy):
+    """Keep the measured base position fixed and face the target."""
+    current_x, current_y, _current_yaw = _finite_pose(
+        current_pose, "current_pose")
+    target_x, target_y = _finite_pair(target_xy, "target_xy")
+    delta_x = target_x - current_x
+    delta_y = target_y - current_y
+    distance = math.hypot(delta_x, delta_y)
+    if distance <= 1e-6:
+        raise ApproachError(
+            "current base position cannot equal the target position")
+    return StandoffGoal(
+        current_x, current_y, math.atan2(delta_y, delta_x), distance)
 
 
 def motion_required(current_xy, goal_xy, tolerance):

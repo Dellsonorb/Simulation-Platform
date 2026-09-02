@@ -9,7 +9,7 @@ import unittest
 
 PACKAGE = Path(__file__).resolve().parents[1]
 MODULE = PACKAGE / "src/p450_flight_facade/translation.py"
-SERVER = PACKAGE / "scripts/p450_flight_facade.py"
+SERVER = PACKAGE / "scripts/p450_flight_facade_node.py"
 
 
 def _load_translation():
@@ -77,6 +77,10 @@ class PrometheusTranslationTest(unittest.TestCase):
 
 
 class FacadeSourceBoundaryTest(unittest.TestCase):
+    def test_installed_node_does_not_shadow_the_python_package(self):
+        self.assertNotEqual(PACKAGE.name + ".py", SERVER.name)
+        self.assertTrue(SERVER.is_file(), SERVER)
+
     def test_server_uses_only_native_prometheus_backend_topics(self):
         self.assertTrue(SERVER.is_file(), SERVER)
         text = SERVER.read_text(encoding="utf-8")

@@ -622,7 +622,7 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         for required in (
                 "FlightCommandAction", "FlightCommandGoal",
                 "MoveBaseAction", "MoveBaseGoal", "Trigger", "UAVState",
-                "observation_is_fresh", "compute_standoff_goal",
+                "observation_is_fresh", "compute_staged_standoff_goals",
                 "transform_is_fresh", "PoseStamped", "lookup_transform",
                 "AIR_HANDOFF", "GROUND_STOPPED", "grasp_confirmed"):
             self.assertIn(required, source)
@@ -639,6 +639,17 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         self.assertIn("self._request_land()", safe_land)
         self.assertIn("self._hover_command", safe_land)
         self.assertNotIn("UAVCommand", safe_land)
+
+    def test_only_near_field_observation_enforces_pick_height(self):
+        source = ORCHESTRATOR.read_text(encoding="utf-8")
+        air_observation = source.split(
+            "    def _observe_from_air(self):", 1)[1].split(
+                "    def _run_air_phase(self):", 1)[0]
+        ground_observation = source.split(
+            "    def _observe_ground_target(self):", 1)[1].split(
+                "    @staticmethod\n    def _pose_message", 1)[0]
+        self.assertNotIn("_validate_near_field_target_height", air_observation)
+        self.assertIn("_validate_near_field_target_height", ground_observation)
 
     def test_orchestrator_direct_execution_does_not_shadow_package(self):
         system_python = Path("/usr/bin/python3")

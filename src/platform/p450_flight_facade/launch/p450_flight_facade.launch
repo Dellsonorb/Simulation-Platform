@@ -2,7 +2,7 @@
   <arg name="action_name" default="/uav1/runtime/flight"/>
   <arg name="odom_frame" default="uav1/odom"/>
 
-  <node pkg="p450_flight_facade" type="p450_flight_facade.py"
+  <node pkg="p450_flight_facade" type="p450_flight_facade_node.py"
     name="p450_flight_facade" output="screen">
     <param name="action_name" value="$(arg action_name)"/>
     <param name="odom_frame" value="$(arg odom_frame)"/>

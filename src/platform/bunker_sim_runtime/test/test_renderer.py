@@ -95,7 +95,7 @@ class RendererTest(unittest.TestCase):
             plugins["bunker_imu"].get("filename"))
         self.assertEqual("imu/data", plugins["bunker_imu"].findtext(
             "topicName"))
-        self.assertEqual("imu_link", plugins["bunker_imu"].findtext(
+        self.assertEqual("ground/imu_link", plugins["bunker_imu"].findtext(
             "frameName"))
         self.assertIsNotNone(root.find("./link[@name='imu_link']"))
         self.assertIsNotNone(root.find("./joint[@name='imu_joint']"))

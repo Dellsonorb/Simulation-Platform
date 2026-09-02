@@ -20,7 +20,7 @@ catkin_package(
 )
 
 catkin_install_python(PROGRAMS
-  scripts/p450_flight_facade.py
+  scripts/p450_flight_facade_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
