@@ -727,23 +727,23 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         checker = _load_module(
             DEMO_CHECKER, "air_ground_pick_observation_checker_test_target")
         samples = (
-            {"stamp": 6.5, "frame": "world"},
-            {"stamp": 6.9, "frame": "world"},
+            {"stamp": 6.5, "frame": "map"},
+            {"stamp": 6.9, "frame": "map"},
         )
         summary = checker.observation_summary(
             samples, status_time=7.0, expected_stamp=6.9,
-            expected_frame="world", maximum_age=1.0)
+            expected_frame="map", maximum_age=1.0)
         self.assertAlmostEqual(0.1, summary["age_s"])
         self.assertAlmostEqual(6.9, summary["stamp"])
         with self.assertRaises(checker.DemoCheckError):
             checker.observation_summary(
                 samples, status_time=8.0, expected_stamp=6.9,
-                expected_frame="world", maximum_age=1.0)
+                expected_frame="map", maximum_age=1.0)
         with self.assertRaises(checker.DemoCheckError):
             checker.observation_summary(
                 ({"stamp": 6.9, "frame": "camera"},),
                 status_time=7.0, expected_stamp=6.9,
-                expected_frame="world", maximum_age=1.0)
+                expected_frame="map", maximum_age=1.0)
 
     def test_demo_checker_requires_one_flight_controller_contact_and_lift(self):
         checker = _load_module(

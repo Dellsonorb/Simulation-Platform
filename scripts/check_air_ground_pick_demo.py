@@ -361,11 +361,11 @@ def run(args):
     ground_event = _event(events, "GROUND_REFINED")
     aerial = observation_summary(
         captured["air_observations"], air_event["ros_time"],
-        air_event.get("observation_stamp"), args.world_frame,
+        air_event.get("observation_stamp"), args.map_frame,
         args.maximum_observation_age)
     ground = observation_summary(
         captured["ground_observations"], ground_event["ros_time"],
-        ground_event.get("observation_stamp"), args.world_frame,
+        ground_event.get("observation_stamp"), args.map_frame,
         args.maximum_observation_age)
     flight = flight_cycle_summary(captured["armed_samples"])
     controllers = controller_success_summary(
@@ -407,7 +407,7 @@ def parse_args(argv=None):
         default="/ground/gripper/grasp_confirmed")
     parser.add_argument("--model-states-topic", default="/gazebo/model_states")
     parser.add_argument("--target-model", default="pick_target")
-    parser.add_argument("--world-frame", default="world")
+    parser.add_argument("--map-frame", default="map")
     parser.add_argument("--maximum-observation-age", type=float, default=1.0)
     parser.add_argument("--maximum-ground-travel", type=float, default=1.10)
     parser.add_argument("--minimum-lift", type=float, default=0.10)

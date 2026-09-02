@@ -119,7 +119,7 @@ trap cleanup EXIT
 trap "exit 130" INT TERM
 
 setsid roslaunch air_ground_pick_demo air_ground_pick_demo.launch \
-  gui:="$gui" px4_workdir:="$px4_workdir" \
+  gui:="$gui" enable_mid360:=true px4_workdir:="$px4_workdir" \
   >"$run_dir/runtime.log" 2>&1 &
 launch_pid=$!
 observed_pgid="$(/bin/ps -o pgid= -p "$launch_pid" | /usr/bin/tr -d '[:space:]')"

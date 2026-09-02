@@ -102,7 +102,8 @@ trap cleanup EXIT
 trap "exit 130" INT TERM
 
 setsid roslaunch sim_platform_bringup air_ground_standalone.launch \
-  gui:="$gui" use_sim_time:=true px4_workdir:="$px4_workdir" \
+  gui:="$gui" use_sim_time:=true enable_mid360:=true \
+  px4_workdir:="$px4_workdir" \
   >"$run_dir/runtime.log" 2>&1 &
 launch_pid=$!
 

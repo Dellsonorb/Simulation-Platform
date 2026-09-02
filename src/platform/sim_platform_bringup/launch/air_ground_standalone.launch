@@ -53,4 +53,11 @@
     <arg name="z" value="$(arg bunker_z)"/>
     <arg name="yaw" value="$(arg bunker_yaw)"/>
   </include>
+
+  <!-- Common robot-facing layers; REAL uses the same facade/navigation above
+       its official native robot stacks. -->
+  <include
+    file="$(find p450_flight_facade)/launch/p450_flight_facade.launch"/>
+  <include
+    file="$(find bunker_navigation)/launch/ground_navigation.launch"/>
 </launch>

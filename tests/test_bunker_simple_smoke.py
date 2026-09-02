@@ -105,6 +105,28 @@ class BunkerSimpleSmokeTest(unittest.TestCase):
         with self.assertRaises(checker.RuntimeCheckError):
             checker.bunker_status_summary(message, now=10.0)
 
+    def test_odometry_summary_uses_official_local_frames(self):
+        checker = load_checker()
+        vector = SimpleNamespace(x=0.0, y=0.0, z=0.0)
+        message = SimpleNamespace(
+            header=SimpleNamespace(
+                stamp=SimpleNamespace(to_sec=lambda: 9.9),
+                frame_id="ground/odom"),
+            child_frame_id="ground/base_link",
+            pose=SimpleNamespace(pose=SimpleNamespace(
+                position=vector,
+                orientation=SimpleNamespace(
+                    x=0.0, y=0.0, z=0.0, w=1.0))),
+            twist=SimpleNamespace(twist=SimpleNamespace(
+                linear=vector, angular=vector)),
+        )
+        summary = checker.odometry_summary(message, now=10.0)
+        self.assertEqual("ground/odom", summary["frame"])
+        self.assertEqual("ground/base_link", summary["child_frame"])
+        message.child_frame_id = "world"
+        with self.assertRaises(checker.RuntimeCheckError):
+            checker.odometry_summary(message, now=10.0)
+
     def test_checker_uses_map_and_covers_driver_compatible_sensor_topics(self):
         source = CHECKER.read_text(encoding="utf-8")
         self.assertIn('(\"map\", \"ground/base_link\")', source)

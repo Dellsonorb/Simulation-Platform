@@ -22,6 +22,7 @@ GROUND_SCAN_FORWARD_RANGE_M = (1.0, 1.6)
 
 AIR_TF_FRAMES = (
     "uav1/base_link",
+    "uav1/lidar_link",
     "uav1/camera_link",
     "uav1/camera_depth_frame",
     "uav1/camera_ired1_frame",
@@ -72,6 +73,44 @@ def camera_info_summary(message, expected_frame, now):
             message.P[0] <= 0.0 or message.P[5] <= 0.0):
         raise RuntimeCheckError("camera calibration is invalid")
     summary.update({"width": message.width, "height": message.height})
+    return summary
+
+
+def odometry_summary(message, expected_frame, expected_child, now):
+    summary = sensor_header_summary(message, expected_frame, now)
+    child = message.child_frame_id.lstrip("/")
+    if child != expected_child:
+        raise RuntimeCheckError(
+            "odometry child frame is %s, expected %s" %
+            (message.child_frame_id, expected_child))
+    pose = message.pose.pose
+    twist = message.twist.twist
+    values = (
+        pose.position.x, pose.position.y, pose.position.z,
+        pose.orientation.x, pose.orientation.y,
+        pose.orientation.z, pose.orientation.w,
+        twist.linear.x, twist.linear.y, twist.linear.z,
+        twist.angular.x, twist.angular.y, twist.angular.z,
+    )
+    if not all(math.isfinite(float(value)) for value in values):
+        raise RuntimeCheckError("odometry contains non-finite values")
+    summary["child_frame"] = child
+    return summary
+
+
+def point_cloud_summary(message, expected_frame, now):
+    summary = sensor_header_summary(message, expected_frame, now)
+    if (message.width <= 0 or message.height <= 0 or
+            message.point_step <= 0 or message.row_step <= 0 or
+            not message.data):
+        raise RuntimeCheckError("point cloud is empty or malformed")
+    if message.row_step < message.width * message.point_step:
+        raise RuntimeCheckError("point cloud row_step is inconsistent")
+    summary.update({
+        "width": int(message.width),
+        "height": int(message.height),
+        "point_step": int(message.point_step),
+    })
     return summary
 
 
@@ -197,6 +236,15 @@ def check_p450_state(rospy, mavros_state_type, uav_state_type, timeout):
     }
 
 
+def check_p450_odom(rospy, odometry_type, timeout):
+    message, _summary = wait_for_current_sensor(
+        rospy, "/uav1/prometheus/odom", odometry_type,
+        "uav1/odom", timeout)
+    return odometry_summary(
+        message, "uav1/odom", "uav1/base_link",
+        rospy.Time.now().to_sec())
+
+
 def p450_sensor_contracts(image_type, camera_info_type, imu_type):
     return (
         ("color", "/uav1/camera/color/image_raw", image_type,
@@ -234,6 +282,35 @@ def check_p450_sensors(
             raise RuntimeCheckError(
                 "%s image and camera info dimensions differ" % image_label)
     return results
+
+
+def check_p450_mid360(rospy, point_cloud_type, timeout):
+    message, _summary = wait_for_current_sensor(
+        rospy, "/uav1/livox/lidar", point_cloud_type,
+        "uav1/lidar_link", timeout)
+    return point_cloud_summary(
+        message, "uav1/lidar_link", rospy.Time.now().to_sec())
+
+
+def check_common_interfaces(
+        rospy, actionlib, flight_action_type, move_base_action_type, timeout):
+    endpoints = (
+        ("flight", "/uav1/runtime/flight", flight_action_type),
+        ("navigation", "/ground/move_base", move_base_action_type),
+    )
+    observed = {}
+    for label, name, action_type in endpoints:
+        client = actionlib.SimpleActionClient(name, action_type)
+        if not client.wait_for_server(rospy.Duration(timeout)):
+            raise RuntimeCheckError("%s action is unavailable" % name)
+        observed[label] = name
+    try:
+        rospy.wait_for_service("/ground/runtime/stop", timeout=timeout)
+    except Exception as error:
+        raise RuntimeCheckError(
+            "/ground/runtime/stop service is unavailable: %s" % error)
+    observed["stop"] = "/ground/runtime/stop"
+    return observed
 
 
 def check_current_tf_frames(rospy, tf2_ros, frames, timeout):
@@ -284,6 +361,7 @@ def check_ground_joints(
 
 def run_checks(timeout):
     try:
+        import actionlib
         import check_ground_manipulator_runtime as ground
         import rospy
         import tf2_ros
@@ -293,7 +371,9 @@ def run_checks(timeout):
         from geometry_msgs.msg import Twist
         from mavros_msgs.msg import State
         from nav_msgs.msg import Odometry
+        from move_base_msgs.msg import MoveBaseAction
         from prometheus_msgs.msg import UAVState
+        from robot_runtime_interfaces.msg import FlightCommandAction
         from sensor_msgs.msg import (
             CameraInfo, Image, Imu, JointState, LaserScan, PointCloud2)
         from std_msgs.msg import Bool
@@ -308,11 +388,17 @@ def run_checks(timeout):
             raise RuntimeCheckError("simulation clock did not start")
         time.sleep(0.05)
 
-    checks = {"models": check_models(rospy, ModelStates, timeout)}
+    checks = {
+        "models": check_models(rospy, ModelStates, timeout),
+        "common_interfaces": check_common_interfaces(
+            rospy, actionlib, FlightCommandAction, MoveBaseAction, timeout),
+    }
     checks["p450"] = {
         "state": check_p450_state(rospy, State, UAVState, timeout),
+        "odom": check_p450_odom(rospy, Odometry, timeout),
         "sensors": check_p450_sensors(
             rospy, Image, CameraInfo, Imu, timeout),
+        "mid360": check_p450_mid360(rospy, PointCloud2, timeout),
         "tf": check_air_tf(rospy, tf2_ros, timeout),
     }
     checks["ground"] = {
@@ -330,6 +416,7 @@ def run_checks(timeout):
         "imu": bunker.check_imu(rospy, Imu, timeout),
         "bunker_status": bunker.check_status(
             rospy, BunkerStatus, timeout),
+        "odom": bunker.check_odom(rospy, Odometry, timeout),
         "tf": check_ground_tf(rospy, tf2_ros, timeout),
         "motion": bunker.check_motion(
             rospy, Odometry, Twist, timeout),

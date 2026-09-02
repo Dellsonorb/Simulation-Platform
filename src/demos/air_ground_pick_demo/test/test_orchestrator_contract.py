@@ -8,9 +8,12 @@ import yaml
 
 
 PACKAGE = Path(__file__).resolve().parents[1]
+ROOT = PACKAGE.parents[2]
 ORCHESTRATOR = PACKAGE / "scripts/run_air_ground_pick_demo.py"
 CONFIG = PACKAGE / "config/demo.yaml"
 LAUNCH = PACKAGE / "launch/air_ground_pick_demo.launch"
+SIM_COMPOSITION = (
+    ROOT / "src/platform/sim_platform_bringup/launch/air_ground_standalone.launch")
 
 
 class OrchestratorContractTest(unittest.TestCase):
@@ -51,12 +54,21 @@ class OrchestratorContractTest(unittest.TestCase):
             self.assertNotIn(removed, config)
 
     def test_sim_composition_starts_common_flight_and_navigation_layers(self):
-        root = ET.parse(str(LAUNCH)).getroot()
-        includes = [item.get("file") for item in root.findall("include")]
-        self.assertTrue(any(
-            "p450_flight_facade.launch" in item for item in includes))
-        self.assertTrue(any(
-            "ground_navigation.launch" in item for item in includes))
+        demo_includes = [
+            item.get("file")
+            for item in ET.parse(str(LAUNCH)).getroot().findall("include")]
+        self.assertFalse(any(
+            "p450_flight_facade.launch" in item for item in demo_includes))
+        self.assertFalse(any(
+            "ground_navigation.launch" in item for item in demo_includes))
+        sim_includes = [
+            item.get("file")
+            for item in ET.parse(str(SIM_COMPOSITION)).getroot().findall(
+                "include")]
+        self.assertEqual(1, sum(
+            "p450_flight_facade.launch" in item for item in sim_includes))
+        self.assertEqual(1, sum(
+            "ground_navigation.launch" in item for item in sim_includes))
         for observer in ("air_observer.yaml", "ground_observer.yaml"):
             config = yaml.safe_load((PACKAGE / "config" / observer).read_text(
                 encoding="utf-8"))

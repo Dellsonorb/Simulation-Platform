@@ -4,11 +4,22 @@
 from pathlib import Path
 import re
 import unittest
+import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[1]
 INTERFACES = ROOT / "src/platform/robot_runtime_interfaces"
 BUNKER_MSGS = ROOT / "src/vendor/bunker_msgs"
+SIM_BRINGUP = ROOT / "src/platform/sim_platform_bringup"
+SIM_COMPOSITION = SIM_BRINGUP / "launch/air_ground_standalone.launch"
+DEMO_LAUNCH = (
+    ROOT / "src/demos/air_ground_pick_demo/launch/air_ground_pick_demo.launch")
+RUNTIME_CHECKER = ROOT / "scripts/check_air_ground_runtime.py"
+BUNKER_CHECKER = ROOT / "scripts/check_bunker_runtime.py"
+PICK_CHECKER = ROOT / "scripts/check_air_ground_pick_demo.py"
+PLATFORM_SMOKE = ROOT / "scripts/smoke_air_ground_standalone.bash"
+DEMO_SMOKE = ROOT / "scripts/smoke_air_ground_pick_demo.bash"
+README = ROOT / "README.md"
 
 
 def _meaningful_lines(path):
@@ -103,6 +114,74 @@ class BunkerMessageContractTest(unittest.TestCase):
         for forbidden in ("gazebo", "ugv_sdk", "socketcan", "can_msgs",
                           "RobotState.msg"):
             self.assertNotIn(forbidden, text)
+
+
+class CommonRuntimeCompositionTest(unittest.TestCase):
+    def test_sim_composition_starts_one_common_flight_and_navigation_layer(self):
+        sim_includes = [
+            item.get("file")
+            for item in ET.parse(str(SIM_COMPOSITION)).getroot().findall(
+                "include")]
+        self.assertEqual(1, sum(
+            "p450_flight_facade.launch" in item for item in sim_includes))
+        self.assertEqual(1, sum(
+            "ground_navigation.launch" in item for item in sim_includes))
+
+        demo_includes = [
+            item.get("file")
+            for item in ET.parse(str(DEMO_LAUNCH)).getroot().findall("include")]
+        self.assertFalse(any(
+            "p450_flight_facade.launch" in item for item in demo_includes))
+        self.assertFalse(any(
+            "ground_navigation.launch" in item for item in demo_includes))
+
+        dependencies = {
+            item.text
+            for item in ET.parse(str(SIM_BRINGUP / "package.xml"))
+            .getroot().findall("exec_depend")}
+        self.assertIn("p450_flight_facade", dependencies)
+        self.assertIn("bunker_navigation", dependencies)
+
+    def test_joint_checker_probes_common_and_native_robot_interfaces(self):
+        source = RUNTIME_CHECKER.read_text(encoding="utf-8")
+        combined = source + BUNKER_CHECKER.read_text(encoding="utf-8")
+        for required in (
+                "FlightCommandAction", "MoveBaseAction",
+                '"/uav1/runtime/flight"', '"/ground/move_base"',
+                '"/ground/runtime/stop"',
+                '"/uav1/prometheus/state"',
+                '"/uav1/prometheus/odom"',
+                '"/uav1/livox/lidar"', "PointCloud2",
+                '"/ground/odom"', '"/ground/bunker_status"',
+                '"/ground/scan"', '"/ground/imu/data"'):
+            self.assertIn(required, combined)
+
+    def test_pick_checker_uses_map_and_keeps_gazebo_as_external_oracle(self):
+        source = PICK_CHECKER.read_text(encoding="utf-8")
+        self.assertIn('parser.add_argument("--map-frame", default="map")', source)
+        self.assertIn("args.map_frame", source)
+        self.assertNotIn("args.world_frame", source)
+        self.assertIn("Use Gazebo pose only as an external E2E test oracle", source)
+        self.assertIn('default="/ground/gripper/grasp_confirmed"', source)
+
+    def test_full_platform_smokes_enable_the_standard_mid360_topic(self):
+        for path in (PLATFORM_SMOKE, DEMO_SMOKE):
+            source = path.read_text(encoding="utf-8")
+            self.assertIn("enable_mid360:=true", source, path.name)
+
+    def test_readme_records_public_contract_and_real_replacement_boundaries(self):
+        source = README.read_text(encoding="utf-8")
+        for required in (
+                "## SIM/REAL robot-facing contract",
+                "/uav1/runtime/flight",
+                "/ground/move_base",
+                "/ground/runtime/stop",
+                "/ground/gripper/grasp_confirmed",
+                "map -> uav1/odom -> uav1/base_link",
+                "map -> ground/odom -> ground/base_link",
+                "p450_experiment + Prometheus + MAVROS + PX4",
+                "bunker_base -> ugv_sdk -> CAN"):
+            self.assertIn(required, source)
 
 
 if __name__ == "__main__":

@@ -21,11 +21,6 @@
   </include>
 
   <include
-    file="$(find p450_flight_facade)/launch/p450_flight_facade.launch"/>
-  <include
-    file="$(find bunker_navigation)/launch/ground_navigation.launch"/>
-
-  <include
     if="$(arg start_moveit)"
     file="$(find bunker_aubo_moveit_config)/launch/ground_move_group.launch"/>
   <include

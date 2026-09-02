@@ -100,6 +100,28 @@ def bunker_status_summary(message, now):
     return summary
 
 
+def odometry_summary(message, now):
+    summary = current_header_summary(message, "ground/odom", now)
+    child = message.child_frame_id.lstrip("/")
+    if child != "ground/base_link":
+        raise RuntimeCheckError(
+            "/ground/odom child frame is %s, expected ground/base_link" %
+            message.child_frame_id)
+    pose = message.pose.pose
+    twist = message.twist.twist
+    values = (
+        pose.position.x, pose.position.y, pose.position.z,
+        pose.orientation.x, pose.orientation.y,
+        pose.orientation.z, pose.orientation.w,
+        twist.linear.x, twist.linear.y, twist.linear.z,
+        twist.angular.x, twist.angular.y, twist.angular.z,
+    )
+    if not all(math.isfinite(float(value)) for value in values):
+        raise RuntimeCheckError("/ground/odom contains non-finite values")
+    summary["child_frame"] = child
+    return summary
+
+
 def pose_from_odometry(message):
     position = message.pose.pose.position
     orientation = message.pose.pose.orientation
@@ -210,6 +232,12 @@ def check_status(rospy, status_type, timeout):
         bunker_status_summary, timeout)
 
 
+def check_odom(rospy, odometry_type, timeout):
+    return check_advancing_topic(
+        rospy, "/ground/odom", odometry_type,
+        odometry_summary, timeout)
+
+
 def check_tf(rospy, tf2_ros, timeout):
     buffer = tf2_ros.Buffer()
     listener = tf2_ros.TransformListener(buffer)
@@ -316,6 +344,7 @@ def run_checks(timeout):
 
     return {
         "model": check_model(rospy, ModelStates, timeout),
+        "odom": check_odom(rospy, Odometry, timeout),
         "scan": check_scan(rospy, LaserScan, timeout),
         "imu": check_imu(rospy, Imu, timeout),
         "status": check_status(rospy, BunkerStatus, timeout),
