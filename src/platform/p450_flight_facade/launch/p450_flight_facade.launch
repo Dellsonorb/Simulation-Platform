@@ -1,0 +1,15 @@
+<launch>
+  <arg name="action_name" default="/uav1/runtime/flight"/>
+  <arg name="odom_frame" default="uav1/odom"/>
+
+  <node pkg="p450_flight_facade" type="p450_flight_facade.py"
+    name="p450_flight_facade" output="screen">
+    <param name="action_name" value="$(arg action_name)"/>
+    <param name="odom_frame" value="$(arg odom_frame)"/>
+    <param name="command_topic" value="/uav1/prometheus/command"/>
+    <param name="setup_topic" value="/uav1/prometheus/setup"/>
+    <param name="state_topic" value="/uav1/prometheus/state"/>
+    <param name="control_state_topic" value="/uav1/prometheus/control_state"/>
+    <param name="odom_topic" value="/uav1/prometheus/odom"/>
+  </node>
+</launch>
