@@ -1,0 +1,13 @@
+uint8 TAKEOFF=1
+uint8 FLY_TO=2
+uint8 HOVER=3
+uint8 LAND=4
+uint8 command
+geometry_msgs/PoseStamped target
+---
+bool success
+string message
+---
+geometry_msgs/PoseStamped current_pose
+float32 position_error
+string native_mode

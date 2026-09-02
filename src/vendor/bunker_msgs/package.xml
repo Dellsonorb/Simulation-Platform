@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>bunker_msgs</name>
+  <version>0.3.3</version>
+  <description>ROS message boundary for the AgileX BUNKER mobile base.</description>
+
+  <maintainer email="simulation-platform@example.invalid">Simulation Platform Maintainers</maintainer>
+  <license>BSD</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>message_generation</build_depend>
+  <build_depend>std_msgs</build_depend>
+  <build_export_depend>std_msgs</build_export_depend>
+  <exec_depend>message_runtime</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+</package>
