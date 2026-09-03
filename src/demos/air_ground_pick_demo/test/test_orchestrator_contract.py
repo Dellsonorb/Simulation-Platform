@@ -12,6 +12,9 @@ ROOT = PACKAGE.parents[2]
 ORCHESTRATOR = PACKAGE / "scripts/run_air_ground_pick_demo.py"
 CONFIG = PACKAGE / "config/demo.yaml"
 LAUNCH = PACKAGE / "launch/air_ground_pick_demo.launch"
+RM4D_LAUNCH = ROOT / (
+    "src/integrations/rm4d_sim_integration/launch/"
+    "rm4d_air_ground_pick_demo.launch")
 SIM_COMPOSITION = (
     ROOT / "src/platform/sim_platform_bringup/launch/air_ground_standalone.launch")
 
@@ -47,6 +50,10 @@ class OrchestratorContractTest(unittest.TestCase):
         self.assertEqual(
             "/ground/gripper/grasp_confirmed",
             config["grasp_confirmed_topic"])
+        self.assertEqual("standoff", config["placement_mode"])
+        self.assertEqual(
+            "/rm4d/plan_base_placement", config["rm4d_service"])
+        self.assertGreater(config["rm4d_top_k"], 0)
         for removed in (
                 "uav_setup_topic", "uav_command_topic",
                 "uav_control_state_topic", "ground_cmd_topic",
@@ -73,6 +80,49 @@ class OrchestratorContractTest(unittest.TestCase):
             config = yaml.safe_load((PACKAGE / "config" / observer).read_text(
                 encoding="utf-8"))
             self.assertEqual("map", config["target_frame"])
+
+    def test_rm4d_mode_preserves_top_one_and_uses_exact_pregrasp(self):
+        source = ORCHESTRATOR.read_text(encoding="utf-8")
+        selection = source.split(
+            "    def _select_rm4d_candidate(", 1)[1].split(
+            "    def _approach_ground_rm4d(", 1)[0]
+        self.assertIn("generate_top_down_grasp", selection)
+        self.assertIn("PlanBasePlacementRequest", source)
+        self.assertIn("_rm4d_request_type", selection)
+        self.assertIn("response.candidates.poses[0]", selection)
+        self.assertIn("response.candidate_ids[0]", selection)
+        self.assertIn("response.scores[0]", selection)
+
+        approach = source.split(
+            "    def _approach_ground_rm4d(", 1)[1].split(
+            "    def _approach_ground_standoff(", 1)[0]
+        self.assertIn("compute_staged_candidate_goals", approach)
+        self.assertIn("RM4D_CANDIDATES", approach)
+        self.assertNotIn("compute_standoff_goal", approach)
+        self.assertNotIn("compute_heading_goal", approach)
+
+        observation = source.split(
+            "    def _observe_ground_target_rm4d(", 1)[1].split(
+            "    def _observe_ground_target_standoff(", 1)[0]
+        self.assertIn("generate_top_down_grasp", observation)
+        self.assertIn("generated.pregrasp", observation)
+        self.assertIn("rospy.Time.now()", observation)
+        self.assertIn("_execute_pregrasp", observation)
+        self.assertNotIn("_move_to_ground_observation", observation)
+        self.assertNotIn("regularize", observation)
+
+    def test_rm4d_composition_starts_adapter_and_selects_mode(self):
+        root = ET.parse(str(RM4D_LAUNCH)).getroot()
+        includes = root.findall("include")
+        self.assertTrue(any(
+            "rm4d_adapter.launch" in item.get("file", "")
+            for item in includes))
+        demo = next(
+            item for item in includes
+            if "air_ground_pick_demo.launch" in item.get("file", ""))
+        arguments = {
+            item.get("name"): item.get("value") for item in demo.findall("arg")}
+        self.assertEqual("rm4d", arguments["placement_mode"])
 
 
 if __name__ == "__main__":

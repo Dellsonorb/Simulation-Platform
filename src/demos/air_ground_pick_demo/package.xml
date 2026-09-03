@@ -29,6 +29,7 @@
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>rospy</exec_depend>
   <exec_depend>robot_runtime_interfaces</exec_depend>
+  <exec_depend>rm4d_sim_integration</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>

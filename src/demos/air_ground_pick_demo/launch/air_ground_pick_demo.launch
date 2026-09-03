@@ -3,6 +3,7 @@
   <arg name="enable_mid360" default="false"/>
   <arg name="run_demo" default="true"/>
   <arg name="start_moveit" default="true"/>
+  <arg name="placement_mode" default="standoff"/>
   <arg name="px4_workdir" default="sitl_air_ground_pick_v1"/>
   <arg name="target_x" default="2.0"/>
   <arg name="target_y" default="0.0"/>
@@ -58,5 +59,6 @@
         type="run_air_ground_pick_demo.py" output="screen" required="true">
     <rosparam command="load"
       file="$(find air_ground_pick_demo)/config/demo.yaml"/>
+    <param name="placement_mode" value="$(arg placement_mode)"/>
   </node>
 </launch>

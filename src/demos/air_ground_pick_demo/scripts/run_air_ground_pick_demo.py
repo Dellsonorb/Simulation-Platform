@@ -29,6 +29,7 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 from air_ground_pick_demo.approach import (
     ApproachError,
     compute_heading_goal,
+    compute_staged_candidate_goals,
     compute_staged_standoff_goals,
     motion_required,
     transform_is_fresh,
@@ -88,6 +89,19 @@ class AirGroundPickDemo:
         self._gripper_action = self._param("gripper_action")
         self._map_frame = self._param("map_frame")
         self._ground_base_frame = self._param("ground_base_frame")
+        self._placement_mode = self._param("placement_mode")
+        if self._placement_mode not in ("standoff", "rm4d"):
+            raise DemoError("~placement_mode must be standoff or rm4d")
+        self._rm4d_service = self._param("rm4d_service")
+        self._rm4d_grasp_id = self._param("rm4d_grasp_id")
+        if (not isinstance(self._rm4d_grasp_id, str) or
+                not self._rm4d_grasp_id):
+            raise DemoError("~rm4d_grasp_id must be a non-empty string")
+        self._rm4d_top_k = self._param("rm4d_top_k")
+        if type(self._rm4d_top_k) is not int or self._rm4d_top_k <= 0:
+            raise DemoError("~rm4d_top_k must be a positive integer")
+        self._rm4d_service_timeout = self._positive(
+            "rm4d_service_timeout")
 
         self._preflight_timeout = self._positive("preflight_timeout")
         self._flight_action_timeout = self._positive(
@@ -198,6 +212,16 @@ class AirGroundPickDemo:
             self._ground_navigation_action, MoveBaseAction)
         self._ground_stop = rospy.ServiceProxy(
             self._ground_stop_service, Trigger)
+        self._rm4d_client = None
+        self._rm4d_request_type = None
+        if self._placement_mode == "rm4d":
+            from rm4d_sim_integration.srv import (
+                PlanBasePlacement,
+                PlanBasePlacementRequest,
+            )
+            self._rm4d_request_type = PlanBasePlacementRequest
+            self._rm4d_client = rospy.ServiceProxy(
+                self._rm4d_service, PlanBasePlacement)
         self._arm_client = actionlib.SimpleActionClient(
             self._arm_action, FollowJointTrajectoryAction)
         self._gripper_client = actionlib.SimpleActionClient(
@@ -500,7 +524,85 @@ class AirGroundPickDemo:
                 "%s failed: %s" %
                 (label, self._navigation_client.get_goal_status_text()))
 
-    def _approach_ground(self, target_map):
+    def _select_rm4d_candidate(self, target_map):
+        generated = generate_top_down_grasp(
+            target_map, self._target_size, self._pregrasp_height,
+            self._lift_height, self._finger_pad_lower_edge_offset,
+            self._contact_overlap, self._surface_clearance)
+        request = self._rm4d_request_type()
+        request.grasp_tcp = self._pose_message(
+            generated.grasp, self._map_frame, rospy.Time.now())
+        request.grasp_id = self._rm4d_grasp_id
+        request.top_k = self._rm4d_top_k
+        try:
+            rospy.wait_for_service(
+                self._rm4d_service, timeout=self._rm4d_service_timeout)
+            response = self._rm4d_client(request)
+        except (rospy.ROSException, rospy.ServiceException) as error:
+            raise DemoError("RM4D service failed: %s" % error) from error
+        if not response.success:
+            raise DemoError(
+                "RM4D returned %s: %s" %
+                (response.status, response.message))
+        if response.candidates.header.frame_id != self._map_frame:
+            raise DemoError("RM4D candidates are not in map")
+        if not (
+                len(response.candidates.poses) ==
+                len(response.candidate_ids) == len(response.scores) and
+                response.candidates.poses):
+            raise DemoError("RM4D candidate response is incomplete")
+        top_pose = response.candidates.poses[0]
+        top_id = response.candidate_ids[0]
+        top_score = float(response.scores[0])
+        candidate = (
+            float(top_pose.position.x),
+            float(top_pose.position.y),
+            self._yaw_from_quaternion(top_pose.orientation),
+        )
+        if (not top_id or not math.isfinite(top_score) or
+                not all(math.isfinite(value) for value in candidate)):
+            raise DemoError("RM4D top candidate is invalid")
+        return candidate, top_id, top_score, len(response.candidates.poses)
+
+    def _approach_ground_rm4d(self, target_map):
+        start = self._ground_pose()
+        candidate, candidate_id, score, count = \
+            self._select_rm4d_candidate(target_map)
+        positioning_goal, final_goal = compute_staged_candidate_goals(
+            start, candidate)
+        self._publish_status(
+            "RM4D_CANDIDATES", candidate_count=count,
+            top_candidate_id=candidate_id,
+            top_candidate_score=score,
+            top_candidate_pose_map=list(candidate))
+        self._publish_status(
+            "GROUND_APPROACH", start_map=list(start),
+            target_map=list(target_map),
+            navigation_goal_map=[
+                final_goal.x, final_goal.y, final_goal.yaw],
+            top_candidate_id=candidate_id,
+            top_candidate_score=score)
+        if not self._navigation_client.wait_for_server(
+                rospy.Duration(self._navigation_timeout)):
+            raise DemoError("ground navigation action is unavailable")
+        if positioning_goal != final_goal:
+            raise DemoError("RM4D candidate geometry changed internally")
+        self._execute_ground_goal(final_goal, "RM4D top-1 navigation")
+        self._stop_ground(required=True)
+        final = self._ground_pose()
+        total_travel = travel_distance(start[:2], final[:2])
+        if total_travel > self._max_ground_travel:
+            raise DemoError("ground travel bound exceeded")
+        target_distance = travel_distance(final[:2], target_map[:2])
+        self._publish_status(
+            "GROUND_STOPPED", ground_travel=total_travel,
+            target_distance=target_distance,
+            navigation_goal_map=[
+                final_goal.x, final_goal.y, final_goal.yaw],
+            top_candidate_id=candidate_id,
+            top_candidate_score=score)
+
+    def _approach_ground_standoff(self, target_map):
         start = self._ground_pose()
         positioning_goal, final_goal = compute_staged_standoff_goals(
             start, target_map[:2], self._ground_standoff)
@@ -534,6 +636,11 @@ class AirGroundPickDemo:
         self._publish_status(
             "GROUND_STOPPED", ground_travel=total_travel,
             target_distance=target_distance)
+
+    def _approach_ground(self, target_map):
+        if self._placement_mode == "rm4d":
+            return self._approach_ground_rm4d(target_map)
+        return self._approach_ground_standoff(target_map)
 
     @staticmethod
     def _joint_position_map(message):
@@ -682,10 +789,7 @@ class AirGroundPickDemo:
                 (target[2], expected_center_z,
                  self._target_center_height_tolerance))
 
-    def _observe_ground_target(self):
-        self._publish_status("GROUND_OBSERVE")
-        opening = self._open_gripper()
-        self._move_to_ground_observation()
+    def _wait_for_ground_target(self, opening):
         started = time.monotonic()
         deadline = started + self._ground_observation_timeout
         while not rospy.is_shutdown() and time.monotonic() < deadline:
@@ -705,6 +809,32 @@ class AirGroundPickDemo:
                 return pose, target
             self._wait_step()
         raise DemoError("near-field D435 observation timed out")
+
+    def _observe_ground_target_rm4d(self, aerial_target):
+        self._publish_status("GROUND_OBSERVE")
+        opening = self._open_gripper()
+        generated = generate_top_down_grasp(
+            aerial_target, self._target_size, self._pregrasp_height,
+            self._lift_height, self._finger_pad_lower_edge_offset,
+            self._contact_overlap, self._surface_clearance)
+        group = self._initialize_moveit()
+        exact_pregrasp = self._pose_message(
+            generated.pregrasp, self._map_frame, rospy.Time.now())
+        target_facing_pregrasp = self._transform_pose(
+            exact_pregrasp, group.get_planning_frame())
+        self._execute_pregrasp(target_facing_pregrasp)
+        return self._wait_for_ground_target(opening)
+
+    def _observe_ground_target_standoff(self, _aerial_target):
+        self._publish_status("GROUND_OBSERVE")
+        opening = self._open_gripper()
+        self._move_to_ground_observation()
+        return self._wait_for_ground_target(opening)
+
+    def _observe_ground_target(self, aerial_target):
+        if self._placement_mode == "rm4d":
+            return self._observe_ground_target_rm4d(aerial_target)
+        return self._observe_ground_target_standoff(aerial_target)
 
     @staticmethod
     def _pose_message(cartesian_pose, frame_id, stamp):
@@ -943,7 +1073,8 @@ class AirGroundPickDemo:
         try:
             target_map = self._run_air_phase()
             self._approach_ground(target_map)
-            sensor_pose, refined_target = self._observe_ground_target()
+            sensor_pose, refined_target = self._observe_ground_target(
+                target_map)
             self._pick_and_lift(sensor_pose, refined_target)
             return True
         except (DemoError, ApproachError, GraspError,

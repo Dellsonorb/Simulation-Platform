@@ -630,7 +630,7 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         for forbidden in (
                 "/gazebo/model", "getmodelstate", "setmodelstate",
                 "teleport", "attach", "benchmark", "provenance",
-                "task-aware", "rm4d", "uavcommand", "uavsetup",
+                "task-aware", "uavcommand", "uavsetup",
                 "uavcontrolstate", "laserscan", "twist", "world",
                 "/ground/cmd_vel", "/ground/nav_cmd_vel"):
             self.assertNotIn(forbidden, lowered)
@@ -646,8 +646,8 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
             "    def _observe_from_air(self):", 1)[1].split(
                 "    def _run_air_phase(self):", 1)[0]
         ground_observation = source.split(
-            "    def _observe_ground_target(self):", 1)[1].split(
-                "    @staticmethod\n    def _pose_message", 1)[0]
+            "    def _wait_for_ground_target(self, opening):", 1)[1].split(
+                "    def _observe_ground_target_rm4d(", 1)[0]
         self.assertNotIn("_validate_near_field_target_height", air_observation)
         self.assertIn("_validate_near_field_target_height", ground_observation)
 

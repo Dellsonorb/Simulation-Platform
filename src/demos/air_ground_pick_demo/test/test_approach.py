@@ -64,6 +64,22 @@ class ApproachTest(unittest.TestCase):
         self.assertAlmostEqual(
             math.atan2(-0.01, -0.84), heading.yaw)
 
+    def test_staged_candidate_finishes_at_exact_rm4d_pose(self):
+        approach = load_module()
+
+        positioning, final = approach.compute_staged_candidate_goals(
+            (3.0, 0.0, 0.2), (2.575, 0.375, -0.4))
+
+        expected = approach.GoalGeometry(2.575, 0.375, -0.4)
+        self.assertEqual(expected, positioning)
+        self.assertEqual(expected, final)
+
+    def test_nonfinite_rm4d_candidate_is_rejected(self):
+        approach = load_module()
+        with self.assertRaises(approach.ApproachError):
+            approach.compute_staged_candidate_goals(
+                (3.0, 0.0, 0.0), (2.5, float("nan"), 0.0))
+
     def test_degenerate_or_nonfinite_goal_is_rejected(self):
         approach = load_module()
         for current, target, standoff in (

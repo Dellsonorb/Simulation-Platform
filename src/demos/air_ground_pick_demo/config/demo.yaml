@@ -13,6 +13,11 @@ arm_action: /ground/arm_controller/follow_joint_trajectory
 gripper_action: /ground/gripper_controller/follow_joint_trajectory
 map_frame: map
 ground_base_frame: ground/base_link
+placement_mode: standoff
+rm4d_service: /rm4d/plan_base_placement
+rm4d_grasp_id: side-up-top-grasp
+rm4d_top_k: 5
+rm4d_service_timeout: 30.0
 
 preflight_timeout: 30.0
 flight_action_timeout: 45.0

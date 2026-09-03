@@ -9,6 +9,7 @@ class ApproachError(ValueError):
 
 
 StandoffGoal = namedtuple("StandoffGoal", "x y yaw target_distance")
+GoalGeometry = namedtuple("GoalGeometry", "x y yaw")
 
 
 def _finite_pair(values, name):
@@ -71,6 +72,14 @@ def compute_staged_standoff_goals(current_pose, target_xy, standoff):
     positioning = StandoffGoal(
         final.x, final.y, current_yaw, final.target_distance)
     return positioning, final
+
+
+def compute_staged_candidate_goals(current_pose, candidate_pose):
+    """Keep an RM4D base candidate exactly unchanged for navigation."""
+    _finite_pose(current_pose, "current_pose")
+    candidate = GoalGeometry(
+        *_finite_pose(candidate_pose, "candidate_pose"))
+    return candidate, candidate
 
 
 def compute_heading_goal(current_pose, target_xy):

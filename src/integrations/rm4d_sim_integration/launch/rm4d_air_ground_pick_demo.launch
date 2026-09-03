@@ -1,0 +1,32 @@
+<launch>
+  <arg name="gui" default="false" />
+  <arg name="enable_mid360" default="false" />
+  <arg name="run_demo" default="true" />
+  <arg name="start_moveit" default="true" />
+  <arg name="rviz" default="false" />
+  <arg name="px4_workdir" default="sitl_rm4d_air_ground_pick_v1" />
+  <arg name="rm4d_root" default="$(optenv RM4D_ROOT)" />
+  <arg name="rm4d_python" default="$(optenv RM4D_PYTHON python3)" />
+  <arg name="rm4d_map" default="$(optenv RM4D_MAP)" />
+  <arg name="rm4d_config" default="$(optenv RM4D_CONFIG)" />
+
+  <include file="$(find rm4d_sim_integration)/launch/rm4d_adapter.launch">
+    <arg name="rm4d_root" value="$(arg rm4d_root)" />
+    <arg name="rm4d_python" value="$(arg rm4d_python)" />
+    <arg name="rm4d_map" value="$(arg rm4d_map)" />
+    <arg name="rm4d_config" value="$(arg rm4d_config)" />
+  </include>
+
+  <include file="$(find air_ground_pick_demo)/launch/air_ground_pick_demo.launch">
+    <arg name="gui" value="$(arg gui)" />
+    <arg name="enable_mid360" value="$(arg enable_mid360)" />
+    <arg name="run_demo" value="$(arg run_demo)" />
+    <arg name="start_moveit" value="$(arg start_moveit)" />
+    <arg name="px4_workdir" value="$(arg px4_workdir)" />
+    <arg name="placement_mode" value="rm4d" />
+  </include>
+
+  <node if="$(arg rviz)" name="rm4d_rviz" pkg="rviz" type="rviz"
+        args="-d $(find rm4d_sim_integration)/rviz/rm4d_candidates.rviz"
+        output="screen" />
+</launch>
