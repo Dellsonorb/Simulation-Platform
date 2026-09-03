@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
 import math
+import json
 import sys
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+import yaml
 
 
 PACKAGE = Path(__file__).resolve().parents[1]
@@ -51,6 +54,8 @@ class RosContractTest(unittest.TestCase):
         self.assertIn("rm4d_root", arguments)
         self.assertIn("rm4d_python", arguments)
         self.assertIn("rm4d_map", arguments)
+        self.assertNotIn("''", " ".join(
+            item.get("default", "") for item in arguments.values()))
         node = root.find("node[@type='rm4d_adapter_node.py']")
         self.assertIsNotNone(node)
         self.assertEqual("$(arg rm4d_python)", node.get("launch-prefix"))
@@ -58,6 +63,18 @@ class RosContractTest(unittest.TestCase):
                   for item in node.findall("param")}
         self.assertEqual("map", params["map_frame"])
         self.assertEqual("ground/base_link", params["ground_base_frame"])
+        process_environment = {
+            item.get("name"): item.get("value")
+            for item in node.findall("env")}
+        self.assertIn(
+            "$(find rm4d_sim_integration)/python_compat",
+                      process_environment["PYTHONPATH"])
+        self.assertIn("$(optenv PYTHONPATH)",
+                      process_environment["PYTHONPATH"])
+        compatibility = (
+            PACKAGE / "python_compat/sitecustomize.py").read_text()
+        self.assertIn("sys.path.append", compatibility)
+        self.assertIn("/usr/lib/python3/dist-packages", compatibility)
 
     def test_node_is_map_tf_api_and_visualization_only(self):
         source = (PACKAGE / "scripts/rm4d_adapter_node.py").read_text()
@@ -100,6 +117,30 @@ class MarkerSpecificationTest(unittest.TestCase):
         self.assertAlmostEqual(0.78, max(first_y) - min(first_y))
         self.assertEqual(footprints[0].points[0],
                          footprints[0].points[-1])
+
+
+class SensorReplayContractTest(unittest.TestCase):
+    def test_replay_source_is_sensor_observation_in_map(self):
+        replay = yaml.safe_load(
+            (PACKAGE / "config/p450_rgbd_replay.yaml").read_text())
+        self.assertEqual("/air_observer/target_pose", replay["source_topic"])
+        self.assertEqual("map", replay["frame_id"])
+        self.assertEqual([
+            1.9899721371390122,
+            0.004464723547961525,
+            0.023386687889514802,
+            0.008026569019304208,
+        ], replay["target"])
+        self.assertNotIn("gazebo", json.dumps(replay).lower())
+
+    def test_replay_uses_exact_existing_grasp_and_both_api_paths(self):
+        source = (
+            PACKAGE / "scripts/replay_rm4d_observation.py").read_text()
+        self.assertIn("generate_top_down_grasp", source)
+        self.assertIn("IntegrationCore", source)
+        self.assertIn("PlanBasePlacement", source)
+        self.assertIn('choices=("offline", "online")', source)
+        self.assertNotIn("regularize_for_rm4d", source)
 
 
 if __name__ == "__main__":

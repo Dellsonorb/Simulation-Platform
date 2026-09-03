@@ -1,0 +1,18 @@
+{
+  "source_topic": "/air_observer/target_pose",
+  "frame_id": "map",
+  "target": [
+    1.9899721371390122,
+    0.004464723547961525,
+    0.023386687889514802,
+    0.008026569019304208
+  ],
+  "current_bunker_pose": [3.0, 0.0, 0.0],
+  "grasp_id": "side-up-top-grasp",
+  "target_size": [0.240, 0.053, 0.115],
+  "pregrasp_height": 0.15,
+  "lift_height": 0.15,
+  "finger_pad_lower_edge_offset": 0.0156,
+  "contact_overlap": 0.020,
+  "surface_clearance": 0.010
+}

@@ -28,10 +28,11 @@ catkin_package(
 
 catkin_install_python(PROGRAMS
   scripts/rm4d_adapter_node.py
+  scripts/replay_rm4d_observation.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
-install(DIRECTORY launch rviz
+install(DIRECTORY config launch python_compat rviz
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 

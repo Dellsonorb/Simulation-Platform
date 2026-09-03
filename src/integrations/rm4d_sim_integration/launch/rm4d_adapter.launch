@@ -1,14 +1,16 @@
 <launch>
-  <arg name="rm4d_root" default="$(optenv RM4D_ROOT '')" />
+  <arg name="rm4d_root" default="$(optenv RM4D_ROOT)" />
   <arg name="rm4d_python" default="$(optenv RM4D_PYTHON python3)" />
-  <arg name="rm4d_map" default="$(optenv RM4D_MAP '')" />
-  <arg name="rm4d_config" default="$(optenv RM4D_CONFIG '')" />
+  <arg name="rm4d_map" default="$(optenv RM4D_MAP)" />
+  <arg name="rm4d_config" default="$(optenv RM4D_CONFIG)" />
 
   <node pkg="rm4d_sim_integration"
         type="rm4d_adapter_node.py"
         name="rm4d_adapter"
         output="screen"
         launch-prefix="$(arg rm4d_python)">
+    <env name="PYTHONPATH"
+         value="$(find rm4d_sim_integration)/python_compat:$(optenv PYTHONPATH)" />
     <param name="rm4d_root" value="$(arg rm4d_root)" />
     <param name="rm4d_map" value="$(arg rm4d_map)" />
     <param name="rm4d_config" value="$(arg rm4d_config)" />
