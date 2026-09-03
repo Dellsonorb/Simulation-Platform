@@ -67,6 +67,20 @@ def quaternion_angle(first, second):
     return 2.0 * math.acos(max(-1.0, min(1.0, dot)))
 
 
+def quaternion_from_yaw(yaw):
+    yaw_value, = _finite_tuple((yaw,), 1, "yaw")
+    half_yaw = 0.5 * yaw_value
+    return 0.0, 0.0, math.sin(half_yaw), math.cos(half_yaw)
+
+
+def yaw_from_quaternion(quaternion):
+    x, y, z, w = _normalized_quaternion(quaternion)
+    return math.atan2(
+        2.0 * (w * z + x * y),
+        1.0 - 2.0 * (y * y + z * z),
+    )
+
+
 def regularize_for_rm4d(exact_pose):
     """Return the fixed query-only local-Y regularization of an exact TCP."""
     position = _finite_tuple(exact_pose.position, 3, "position")

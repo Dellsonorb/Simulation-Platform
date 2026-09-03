@@ -1,0 +1,19 @@
+<launch>
+  <arg name="rm4d_root" default="$(optenv RM4D_ROOT '')" />
+  <arg name="rm4d_python" default="$(optenv RM4D_PYTHON python3)" />
+  <arg name="rm4d_map" default="$(optenv RM4D_MAP '')" />
+  <arg name="rm4d_config" default="$(optenv RM4D_CONFIG '')" />
+
+  <node pkg="rm4d_sim_integration"
+        type="rm4d_adapter_node.py"
+        name="rm4d_adapter"
+        output="screen"
+        launch-prefix="$(arg rm4d_python)">
+    <param name="rm4d_root" value="$(arg rm4d_root)" />
+    <param name="rm4d_map" value="$(arg rm4d_map)" />
+    <param name="rm4d_config" value="$(arg rm4d_config)" />
+    <param name="map_frame" value="map" />
+    <param name="ground_base_frame" value="ground/base_link" />
+    <param name="tf_timeout_sec" value="1.0" />
+  </node>
+</launch>

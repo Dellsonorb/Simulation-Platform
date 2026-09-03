@@ -16,7 +16,9 @@ from rm4d_sim_integration.geometry import (  # noqa: E402
     build_rm4d_request,
     ordered_candidates,
     quaternion_angle,
+    quaternion_from_yaw,
     regularize_for_rm4d,
+    yaw_from_quaternion,
 )
 
 
@@ -84,6 +86,13 @@ class FrozenRegularizationTest(unittest.TestCase):
             ["candidate-000162", "candidate-000013"],
             [candidate.candidate_id for candidate in candidates])
         self.assertEqual((2.57, 0.37, 0.0), candidates[0].pose)
+
+    def test_planar_quaternion_round_trip_uses_xyzw(self):
+        for yaw in (-math.pi, -1.2, 0.0, 0.8, math.pi):
+            with self.subTest(yaw=yaw):
+                recovered = yaw_from_quaternion(quaternion_from_yaw(yaw))
+                error = (recovered - yaw + math.pi) % (2.0 * math.pi) - math.pi
+                self.assertAlmostEqual(0.0, error, places=12)
 
 
 if __name__ == "__main__":

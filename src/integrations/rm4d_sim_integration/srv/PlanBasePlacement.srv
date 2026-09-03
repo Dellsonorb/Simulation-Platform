@@ -1,0 +1,10 @@
+geometry_msgs/PoseStamped grasp_tcp
+string grasp_id
+uint32 top_k
+---
+bool success
+string status
+geometry_msgs/PoseArray candidates
+string[] candidate_ids
+float64[] scores
+string message

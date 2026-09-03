@@ -1,0 +1,28 @@
+Panels:
+  - Class: rviz/Displays
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Fixed Frame: map
+  Displays:
+    - Class: rviz/Grid
+      Name: Grid
+      Enabled: true
+    - Class: rviz/TF
+      Name: TF
+      Enabled: true
+    - Class: rviz/RobotModel
+      Name: Robot
+      Enabled: true
+    - Class: rviz/Pose
+      Name: Exact grasp TCP
+      Topic: /rm4d/grasp_tcp
+      Enabled: true
+    - Class: rviz/PoseArray
+      Name: Ranked BUNKER candidates
+      Topic: /rm4d/candidates
+      Enabled: true
+    - Class: rviz/MarkerArray
+      Name: Candidate ranks and footprints
+      Marker Topic: /rm4d/candidate_markers
+      Enabled: true
