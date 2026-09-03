@@ -91,6 +91,9 @@ class RosContractTest(unittest.TestCase):
             self.assertNotIn(forbidden, source)
         self.assertEqual(1, source.count("load_external_api("))
         self.assertIn("self._api.close", source)
+        self.assertIn(
+            "response = self._response(\n                True, result.status,",
+            source)
 
 
 class MarkerSpecificationTest(unittest.TestCase):

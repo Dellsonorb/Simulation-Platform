@@ -87,6 +87,9 @@ class VelocityGuardTest(unittest.TestCase):
             source, r'Subscriber\s*\(\s*"nav_cmd_vel",\s*Twist')
         self.assertIn("command_is_fresh", source)
         self.assertIn("rospy.Timer", source)
+        self.assertGreaterEqual(
+            source.count("rospy.Time.now().to_sec()"), 2)
+        self.assertNotIn("time.monotonic", source)
         self.assertNotIn("cmd_vel_safe", source)
 
 

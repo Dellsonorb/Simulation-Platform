@@ -36,7 +36,8 @@ PX4、BUNKER driver、传感器和定位 adapter 的最底层实现。
 - [实机替换边界](#sim-to-real-boundary)
 
 本项目只建设稳定、真实、可复用的机器人仿真 runtime，不包含论文
-benchmark、RM4D、Task-aware、RL、World Model 或 LLM/VLM 算法基础设施。
+benchmark、Task-aware、RL、World Model 或 LLM/VLM 算法基础设施。RM4D
+只通过只读外部依赖和薄接口接入，算法本体不进入本仓库。
 
 ## SIM/REAL robot-facing contract
 
@@ -305,6 +306,81 @@ path and exits after `LIFT`. The E2E checker may inspect Gazebo model state as
 an external SIM test oracle; the task runtime itself does not consume Gazebo
 ground truth.
 
+### Deterministic RM4D integration
+
+RM4D remains a read-only external algorithm dependency. The supported baseline
+is tag `rm4d-aubo-baseline-v1`, commit
+`e9d431299053f38a4a4319aed3dfeccc261b9fac`. The 10M reachability map used by
+the verified integration has SHA-256
+`77279fafaf61d5c92cf303a644cd9613457c85e0d197c66c4487c30d135db3b4`.
+
+The data path is:
+
+```text
+P450 RGB-D observation in map
+  -> exact side-up grasp TCP
+  -> thin BasePlacementAPI adapter
+  -> ranked BUNKER poses in map
+  -> candidate 0 unchanged to /ground/move_base
+  -> exact aerial-derived MoveIt pregrasp for D435 refinement
+  -> refined grasp -> physical AG95 confirmation -> Lift
+```
+
+The adapter applies the frozen `Local-Y +1e-6 rad` deterministic numerical
+regularization only to a copy of the RM4D query pose. The published grasp TCP,
+the target-facing observation/pregrasp pose, and every MoveIt execution pose
+remain unperturbed. Candidate order is never changed by SIM; navigation and
+MoveIt expose real execution failures.
+
+Point the adapter at the exact detached checkout, its Python environment, and
+the existing map. Nothing is copied into SIM:
+
+```bash
+export RM4D_ROOT=/absolute/path/to/rm4d-aubo-baseline-v1-checkout
+export RM4D_PYTHON=/absolute/path/to/rm4d-python
+export RM4D_MAP=/absolute/path/to/rmap.npy
+
+source install/p450-clean/setup.bash
+rosrun rm4d_sim_integration replay_rm4d_observation.py \
+  --mode offline --rm4d-root "$RM4D_ROOT" \
+  --rm4d-map "$RM4D_MAP" --top-k 5
+```
+
+After starting the integration launch, inspect exact TCP and ranked top-K
+candidates in RViz:
+
+```bash
+rviz -d "$(rospack find rm4d_sim_integration)/rviz/rm4d_candidates.rviz"
+```
+
+Run the bounded natural E2E with the normal sensor, navigation, controller,
+MoveIt, contact, and Lift path:
+
+```bash
+P450_PX4_ROOT="$P450_PX4_ROOT" \
+RM4D_ROOT="$RM4D_ROOT" RM4D_PYTHON="$RM4D_PYTHON" RM4D_MAP="$RM4D_MAP" \
+  ./scripts/smoke_rm4d_air_ground_pick_demo.bash --gui false
+```
+
+The frozen static footprint filter is not a navigation-feasibility proof.
+`move_base` and its costmaps remain authoritative for actual reachability, and
+MoveIt remains authoritative for manipulation feasibility.
+
+The verified natural run used the P450 RGB-D estimate to produce the exact
+grasp TCP, published five unchanged ranked candidates in RViz, and navigated
+top-1 `candidate-000203` at
+`[2.847836, 0.316032, -3.141593]`. Ground travel was `0.319565 m`; the Ground
+D435 then refined the target, AG95 confirmed the physical grasp, and the
+dynamic Brick rose `0.149966 m` (`0.149406 m` measured TCP lift). The checker
+completed with `RM4D_SIM_INTEGRATION_READY`.
+
+One exposed method gap remains visible by design: in that run the oblique
+far-field P450 estimate had a roughly `5.9 cm` lower center height than the
+near-field Ground D435 estimate. No Gazebo ground truth or post-hoc correction
+was substituted into the RM4D request. The frozen RM4D footprint/IK result is
+also not a proof of `move_base` or full-scene MoveIt feasibility; those runtime
+systems continue to decide and expose real failures.
+
 ### Verification
 
 Focused public-interface checks:
@@ -318,7 +394,7 @@ source install/p450-clean/setup.bash
 
 The maintained acceptance path consists of:
 
-1. a clean install-enabled Catkin build of all 26 packages;
+1. a clean install-enabled Catkin build of all 27 packages;
 2. the Python interface, TF, sensor, controller, navigation, and demo tests;
 3. `scripts/smoke_air_ground_standalone.bash`;
 4. `scripts/smoke_air_ground_pick_demo.bash` reaching physical `LIFT`.
@@ -355,6 +431,7 @@ runtime_overlays/    minimal PX4/Gazebo compatibility build
 scripts/             environment wrappers, smoke checks, and E2E checkers
 src/demos/           minimal Air-Ground Pick Demo
 src/ground/          BUNKER navigation and AUBO/AG95 packages
+src/integrations/    thin adapters for read-only external algorithms
 src/p450/            P450, Prometheus, D435, MID360, and PX4-facing packages
 src/platform/        common interfaces, SIM adapters, and joint bringup
 src/vendor/          required robot descriptions and compatible ROS messages
@@ -385,3 +462,4 @@ Generated `build/`, `devel/`, `install/`, `logs/`, `.catkin_tools/`, and
 - [Ground Manipulator Runtime Design](docs/superpowers/specs/2026-09-01-ground-manipulator-a-design.md)
 - [BUNKER Standalone Runtime Design](docs/superpowers/specs/2026-09-01-bunker-a-standalone-runtime-design.md)
 - [GitHub Publication and README Design](docs/superpowers/specs/2026-09-03-github-publication-readme-design.md)
+- [RM4D to SIM Integration Design](docs/superpowers/specs/2026-09-03-rm4d-sim-integration-design.md)

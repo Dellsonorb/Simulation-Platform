@@ -5,6 +5,13 @@
   <arg name="start_moveit" default="true" />
   <arg name="rviz" default="false" />
   <arg name="px4_workdir" default="sitl_rm4d_air_ground_pick_v1" />
+  <!-- Clear-scene parking pose. The ground robot starts at the same natural
+       x/y as the platform demo, facing the target instead of biasing RM4D by
+       pre-positioning it at a previously observed candidate. -->
+  <arg name="bunker_x" default="3.0" />
+  <arg name="bunker_y" default="0.0" />
+  <arg name="bunker_z" default="0.36" />
+  <arg name="bunker_yaw" default="3.141592653589793" />
   <arg name="rm4d_root" default="$(optenv RM4D_ROOT)" />
   <arg name="rm4d_python" default="$(optenv RM4D_PYTHON python3)" />
   <arg name="rm4d_map" default="$(optenv RM4D_MAP)" />
@@ -23,6 +30,10 @@
     <arg name="run_demo" value="$(arg run_demo)" />
     <arg name="start_moveit" value="$(arg start_moveit)" />
     <arg name="px4_workdir" value="$(arg px4_workdir)" />
+    <arg name="bunker_x" value="$(arg bunker_x)" />
+    <arg name="bunker_y" value="$(arg bunker_y)" />
+    <arg name="bunker_z" value="$(arg bunker_z)" />
+    <arg name="bunker_yaw" value="$(arg bunker_yaw)" />
     <arg name="placement_mode" value="rm4d" />
   </include>
 

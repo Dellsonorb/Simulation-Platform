@@ -161,7 +161,7 @@ class RM4DAdapterNode:
                 top_k=int(request.top_k),
             )
             response = self._response(
-                result.status == "ok", result.status,
+                True, result.status,
                 "RM4D returned %d candidate(s)" % len(result.candidates))
             response.candidates = self._publish(
                 request.grasp_tcp, result.candidates)

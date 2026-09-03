@@ -9,16 +9,20 @@
   <arg name="target_y" default="0.0"/>
   <arg name="target_z" default="0.0575"/>
   <arg name="target_yaw" default="0.0"/>
+  <arg name="bunker_x" default="3.0"/>
+  <arg name="bunker_y" default="0.0"/>
+  <arg name="bunker_z" default="0.36"/>
+  <arg name="bunker_yaw" default="0.0"/>
 
   <include
     file="$(find sim_platform_bringup)/launch/air_ground_standalone.launch">
     <arg name="gui" value="$(arg gui)"/>
     <arg name="enable_mid360" value="$(arg enable_mid360)"/>
     <arg name="px4_workdir" value="$(arg px4_workdir)"/>
-    <arg name="bunker_x" value="3.0"/>
-    <arg name="bunker_y" value="0.0"/>
-    <arg name="bunker_z" value="0.36"/>
-    <arg name="bunker_yaw" value="0.0"/>
+    <arg name="bunker_x" value="$(arg bunker_x)"/>
+    <arg name="bunker_y" value="$(arg bunker_y)"/>
+    <arg name="bunker_z" value="$(arg bunker_z)"/>
+    <arg name="bunker_yaw" value="$(arg bunker_yaw)"/>
   </include>
 
   <include

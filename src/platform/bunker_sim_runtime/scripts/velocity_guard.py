@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import math
-import time
 
 import rospy
 from geometry_msgs.msg import Twist
@@ -22,7 +21,7 @@ class VelocityGuard:
             rospy.Duration(min(0.1, self._timeout / 2.0)), self._watchdog)
 
     def _callback(self, message):
-        self._last_input = time.monotonic()
+        self._last_input = rospy.Time.now().to_sec()
         admitted, reason = admit_components(
             message.linear.x, message.linear.y, message.linear.z,
             message.angular.x, message.angular.y, message.angular.z)
@@ -38,7 +37,7 @@ class VelocityGuard:
 
     def _watchdog(self, _event):
         if not command_is_fresh(
-                self._last_input, time.monotonic(), self._timeout):
+                self._last_input, rospy.Time.now().to_sec(), self._timeout):
             self._publisher.publish(Twist())
 
 

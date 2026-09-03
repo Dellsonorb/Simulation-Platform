@@ -582,11 +582,12 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
                            source.index("    def _grasp_confirmation_current(")]
         self.assertIn("_robot_state_from_joint_feedback()", cartesian)
         self.assertNotIn("get_current_state", cartesian)
+        self.assertIn("request.avoid_collisions = True", source)
         lowered = source.lower()
         for forbidden in (
                 "/gazebo/model", "getmodelstate", "setmodelstate",
                 "teleport", "attach", "brick_pick", "contactsstate",
-                "contact_sides", "collision", "bilateral"):
+                "contact_sides", "bilateral"):
             self.assertNotIn(forbidden, lowered)
 
     def test_orchestrator_uses_runtime_interfaces_without_gt_or_teleport(self):
@@ -793,6 +794,25 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         self.assertEqual("PASS", finalized["status"])
         with self.assertRaises(checker.DemoCheckError):
             checker.finalized_summary({"status": "PASS"})
+
+    def test_demo_checker_retains_flight_transitions_during_long_ground_phase(self):
+        checker = _load_module(
+            DEMO_CHECKER, "air_ground_pick_flight_transition_checker_test")
+        monitor = checker.DemoMonitor(
+            rospy=None, goal_succeeded=3, target_model="pick_target")
+        message = type("UavState", (), {})()
+        for armed in (False, True, True, False):
+            message.armed = armed
+            monitor.uav_state(message)
+        for _ in range(6000):
+            message.armed = False
+            monitor.uav_state(message)
+
+        transitions = monitor.snapshot()["armed_samples"]
+        self.assertEqual((False, True, False), transitions)
+        self.assertEqual(
+            {"armed_seen": True, "landed_after_arm": True},
+            checker.flight_cycle_summary(transitions))
 
     def test_demo_smoke_is_bounded_isolated_and_platform_only(self):
         self.assertTrue(DEMO_CHECKER.is_file())

@@ -54,6 +54,8 @@ class OrchestratorContractTest(unittest.TestCase):
         self.assertEqual(
             "/rm4d/plan_base_placement", config["rm4d_service"])
         self.assertGreater(config["rm4d_top_k"], 0)
+        self.assertEqual(6, config["rm4d_pregrasp_plan_attempts"])
+        self.assertNotIn("rm4d_alignment_distance", config)
         for removed in (
                 "uav_setup_topic", "uav_command_topic",
                 "uav_control_state_topic", "ground_cmd_topic",
@@ -98,6 +100,11 @@ class OrchestratorContractTest(unittest.TestCase):
             "    def _approach_ground_standoff(", 1)[0]
         self.assertIn("compute_staged_candidate_goals", approach)
         self.assertIn("RM4D_CANDIDATES", approach)
+        self.assertIn('response.status == "no_feasible_candidate"', source)
+        self.assertIn(
+            "final_goal, \"RM4D top-1 navigation\"", approach)
+        self.assertNotIn("transit heading", approach)
+        self.assertNotIn("alignment position", approach)
         self.assertNotIn("compute_standoff_goal", approach)
         self.assertNotIn("compute_heading_goal", approach)
 
@@ -106,10 +113,22 @@ class OrchestratorContractTest(unittest.TestCase):
             "    def _observe_ground_target_standoff(", 1)[0]
         self.assertIn("generate_top_down_grasp", observation)
         self.assertIn("generated.pregrasp", observation)
+        self.assertIn("generated.grasp", observation)
         self.assertIn("rospy.Time.now()", observation)
-        self.assertIn("_execute_pregrasp", observation)
+        self.assertIn(
+            "_execute_pregrasp(\n            target_facing_pregrasp, "
+            "target_facing_grasp)", observation)
         self.assertNotIn("_move_to_ground_observation", observation)
         self.assertNotIn("regularize", observation)
+
+        pregrasp = source.split(
+            "    def _continuation_from_plan(", 1)[1].split(
+            "    def _execute_cartesian(", 1)[0]
+        self.assertIn("GetCartesianPathRequest", source)
+        self.assertIn("self._rm4d_pregrasp_plan_attempts", pregrasp)
+        self.assertIn("continuation.pose", pregrasp)
+        self.assertIn("response.fraction", pregrasp)
+        self.assertIn("self._cartesian_min_fraction", pregrasp)
 
     def test_rm4d_composition_starts_adapter_and_selects_mode(self):
         root = ET.parse(str(RM4D_LAUNCH)).getroot()

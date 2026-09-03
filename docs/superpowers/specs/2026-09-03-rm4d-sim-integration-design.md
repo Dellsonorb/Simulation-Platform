@@ -1,6 +1,6 @@
 # Deterministic RM4D to Simulation Platform Integration Design
 
-**Status:** Approved and frozen for implementation on 2026-09-03
+**Status:** Frozen, implemented, and naturally verified on 2026-09-03
 
 ## Objective
 
@@ -240,12 +240,54 @@ attachment is allowed.
 4. RM4D IK validity does not include the complete SIM robot, AG95, D435, scene,
    or the refined sensor pose. MoveIt remains the execution authority.
 5. The frozen API needs about one minute for the representative 256-candidate,
-   16-start call. It must be loaded once and queried asynchronously from the
-   rest of the mission startup, but V1 adds no scheduler or lifecycle system.
+   16-start call. The adapter loads it once during launch and the mission makes
+   one synchronous request; V1 adds no scheduler or lifecycle system.
+6. The successful run's far-field oblique P450 estimate placed the Brick
+   center at `z=0.00037 m`, while Ground D435 refinement placed it at
+   `z=0.05904 m`. Both values came from RGB-D rather than Gazebo ground truth.
+   This height bias is a remaining aerial-perception accuracy gap; it is not
+   hidden by the integration adapter or replaced with the near-field result
+   before RM4D.
+
+## Natural verification result
+
+Run `20260903T123813Z-74vpyt` completed the required unmodified execution
+chain. The measured P450 observation in `map` was:
+
+```text
+Brick center = [2.0152423153, 0.0072985443, 0.0003716630]
+Brick yaw    = -0.0239622372 rad
+exact TCP    = [2.0152423153, 0.0072985443, 0.0222716630]
+exact quat   = [0.0084717275, 0.7070560302,
+               -0.0084717275, 0.7070560302]
+```
+
+Only the RM4D query copy received the frozen local-Y regularization. A replay
+of that exact request and the recorded current BUNKER pose returned:
+
+| Rank | Candidate | BUNKER x / y / yaw | Score |
+|---:|---|---|---:|
+| 1 | `candidate-000203` | `2.847836 / 0.316032 / -3.141593` | `0.955644` |
+| 2 | `candidate-000244` | `2.695483 / 0.219655 / -3.141593` | `0.953065` |
+| 3 | `candidate-000208` | `2.688412 / -0.006335 / 2.967060` | `0.938607` |
+| 4 | `candidate-000188` | `2.687097 / -0.130245 / -3.141593` | `0.919543` |
+| 5 | `candidate-000245` | `2.684818 / -0.104197 / -2.967060` | `0.915704` |
+
+The adapter published these five entries unchanged on `/rm4d/candidates` and
+as rank-labelled arrow/footprint markers on `/rm4d/candidate_markers`. The
+first entry was sent unchanged to `/ground/move_base`. Navigation succeeded
+with `0.319565 m` measured ground travel.
+
+Ground D435 then refined the Brick center to
+`[2.0677733583, 0.0002385749, 0.0590397633]` with yaw `0.0078547223 rad`.
+MoveIt completed three post-refinement arm goals, AG95 reported
+`grasp_confirmed=true`, TCP lift was `0.149406 m`, and the physical dynamic
+Brick rose `0.149966 m`. The P450 had exactly one armed interval followed by
+disarm after landing. The final checker status was `PASS`.
 
 ## Verification and terminal condition
 
-Implementation proceeds with test-first changes and short commits:
+Implementation used test-first changes and short commits:
 
 1. adapter request/result conversion and fixed regularization tests;
 2. exact external revision and map/API startup checks;
@@ -256,7 +298,7 @@ Implementation proceeds with test-first changes and short commits:
 7. natural Gazebo `P450 -> RM4D -> BUNKER -> D435 -> grasp -> Lift`;
 8. focused regression tests plus the existing Air-Ground Pick checks.
 
-`RM4D_SIM_INTEGRATION_READY` is emitted only after the natural E2E reaches
-`LIFT`. Work stops at that terminal condition; it does not expand into
+`RM4D_SIM_INTEGRATION_READY` was emitted after the natural E2E reached `LIFT`.
+Work stops at that terminal condition; it does not expand into
 uncertainty, MID360, NBV, Task-aware methods, benchmarks, evidence systems, or
 new safety frameworks.

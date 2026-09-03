@@ -18,6 +18,7 @@ rm4d_service: /rm4d/plan_base_placement
 rm4d_grasp_id: side-up-top-grasp
 rm4d_top_k: 5
 rm4d_service_timeout: 30.0
+rm4d_pregrasp_plan_attempts: 6
 
 preflight_timeout: 30.0
 flight_action_timeout: 45.0

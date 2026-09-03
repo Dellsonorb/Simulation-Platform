@@ -199,7 +199,10 @@ class DemoMonitor:
         self.events = []
         self.air_observations = deque(maxlen=5000)
         self.ground_observations = deque(maxlen=5000)
-        self.armed_samples = deque(maxlen=5000)
+        # Retain state transitions, not every 50 Hz sample. RM4D planning can
+        # make the post-landing ground phase longer than the old sample window
+        # and must not erase the already observed armed interval.
+        self.armed_samples = deque(maxlen=32)
         self.arm_successes = {}
         self.grasp_confirmed = False
         self.target_baseline_z = None
@@ -250,7 +253,9 @@ class DemoMonitor:
 
     def uav_state(self, message):
         with self._lock:
-            self.armed_samples.append(bool(message.armed))
+            armed = bool(message.armed)
+            if not self.armed_samples or self.armed_samples[-1] != armed:
+                self.armed_samples.append(armed)
 
     def arm_status(self, message):
         receipt_stamp = self._rospy.Time.now().to_sec()

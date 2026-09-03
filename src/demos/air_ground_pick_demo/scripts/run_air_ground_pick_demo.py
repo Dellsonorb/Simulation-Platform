@@ -17,6 +17,7 @@ from geometry_msgs.msg import PoseStamped
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 import moveit_commander
 from moveit_msgs.msg import RobotState
+from moveit_msgs.srv import GetCartesianPath, GetCartesianPathRequest
 from prometheus_msgs.msg import UAVState
 import rospy
 from sensor_msgs.msg import JointState
@@ -102,6 +103,12 @@ class AirGroundPickDemo:
             raise DemoError("~rm4d_top_k must be a positive integer")
         self._rm4d_service_timeout = self._positive(
             "rm4d_service_timeout")
+        self._rm4d_pregrasp_plan_attempts = self._param(
+            "rm4d_pregrasp_plan_attempts")
+        if (type(self._rm4d_pregrasp_plan_attempts) is not int or
+                self._rm4d_pregrasp_plan_attempts <= 0):
+            raise DemoError(
+                "~rm4d_pregrasp_plan_attempts must be a positive integer")
 
         self._preflight_timeout = self._positive("preflight_timeout")
         self._flight_action_timeout = self._positive(
@@ -226,6 +233,8 @@ class AirGroundPickDemo:
             self._arm_action, FollowJointTrajectoryAction)
         self._gripper_client = actionlib.SimpleActionClient(
             self._gripper_action, FollowJointTrajectoryAction)
+        self._cartesian_path = rospy.ServiceProxy(
+            "/compute_cartesian_path", GetCartesianPath)
         self._status_pub = rospy.Publisher(
             self._status_topic, String, queue_size=1, latch=True)
 
@@ -544,6 +553,11 @@ class AirGroundPickDemo:
             raise DemoError(
                 "RM4D returned %s: %s" %
                 (response.status, response.message))
+        if response.status == "no_feasible_candidate":
+            raise DemoError("RM4D returned no feasible candidate")
+        if response.status != "ok":
+            raise DemoError("RM4D returned unsupported status %s" %
+                            response.status)
         if response.candidates.header.frame_id != self._map_frame:
             raise DemoError("RM4D candidates are not in map")
         if not (
@@ -820,9 +834,14 @@ class AirGroundPickDemo:
         group = self._initialize_moveit()
         exact_pregrasp = self._pose_message(
             generated.pregrasp, self._map_frame, rospy.Time.now())
+        exact_grasp = self._pose_message(
+            generated.grasp, self._map_frame, exact_pregrasp.header.stamp)
         target_facing_pregrasp = self._transform_pose(
             exact_pregrasp, group.get_planning_frame())
-        self._execute_pregrasp(target_facing_pregrasp)
+        target_facing_grasp = self._transform_pose(
+            exact_grasp, group.get_planning_frame())
+        self._execute_pregrasp(
+            target_facing_pregrasp, target_facing_grasp)
         return self._wait_for_ground_target(opening)
 
     def _observe_ground_target_standoff(self, _aerial_target):
@@ -950,16 +969,56 @@ class AirGroundPickDemo:
             "%s TCP pose error position=%.4f orientation=%.4f" %
             (label, position_error, orientation_error))
 
-    def _execute_pregrasp(self, target):
+    def _continuation_from_plan(self, trajectory, continuation):
+        joint_trajectory = trajectory.joint_trajectory
+        if not joint_trajectory.joint_names or not joint_trajectory.points:
+            return None
+        request = GetCartesianPathRequest()
+        request.header = continuation.header
+        request.start_state.joint_state.name = list(
+            joint_trajectory.joint_names)
+        request.start_state.joint_state.position = list(
+            joint_trajectory.points[-1].positions)
+        request.start_state.is_diff = True
+        request.group_name = self._move_group_name
+        request.link_name = self._end_effector_link
+        request.waypoints = [continuation.pose]
+        request.max_step = self._cartesian_eef_step
+        request.jump_threshold = 0.0
+        request.avoid_collisions = True
+        return self._cartesian_path(request)
+
+    def _execute_pregrasp(self, target, continuation=None):
         group = self._move_group
-        group.set_start_state_to_current_state()
-        group.set_pose_target(target, self._end_effector_link)
-        planned = group.plan()
-        success = bool(planned[0]) if isinstance(planned, tuple) else True
-        trajectory = planned[1] if isinstance(planned, tuple) else planned
-        if not success or not trajectory.joint_trajectory.points:
+        attempts = self._rm4d_pregrasp_plan_attempts \
+            if continuation is not None else 1
+        trajectory = None
+        if continuation is not None:
+            rospy.wait_for_service(
+                "/compute_cartesian_path", timeout=self._moveit_server_timeout)
+        for _attempt in range(attempts):
+            group.set_start_state_to_current_state()
+            group.set_pose_target(target, self._end_effector_link)
+            planned = group.plan()
+            success = bool(planned[0]) if isinstance(planned, tuple) else True
+            candidate = planned[1] if isinstance(planned, tuple) else planned
             group.clear_pose_targets()
-            raise DemoError("MoveIt pregrasp planning failed")
+            if not success or not candidate.joint_trajectory.points:
+                continue
+            if continuation is not None:
+                response = self._continuation_from_plan(
+                    candidate, continuation)
+                if (response is None or
+                        not math.isfinite(response.fraction) or
+                        response.fraction < self._cartesian_min_fraction or
+                        not response.solution.joint_trajectory.points):
+                    continue
+            trajectory = candidate
+            break
+        if trajectory is None:
+            detail = " with no continuation-valid IK branch" \
+                if continuation is not None else ""
+            raise DemoError("MoveIt pregrasp planning failed" + detail)
         if not group.execute(trajectory, wait=True):
             group.clear_pose_targets()
             raise DemoError("MoveIt pregrasp execution failed")

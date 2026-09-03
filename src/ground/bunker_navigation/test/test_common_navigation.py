@@ -73,7 +73,10 @@ class CommonNavigationTest(unittest.TestCase):
         # that nearby goal instead of entering its rotate-to-goal behavior.
         self.assertEqual(0.0, planner["forward_point_distance"])
         self.assertEqual(0.0, planner["min_vel_trans"])
-        self.assertEqual(0.025, planner["xy_goal_tolerance"])
+        self.assertEqual(0.3, planner["max_vel_theta"])
+        self.assertEqual(0.2, planner["min_vel_theta"])
+        self.assertEqual(0.06, planner["xy_goal_tolerance"])
+        self.assertEqual(0.08, planner["yaw_goal_tolerance"])
 
     def test_stop_helper_cancels_navigation_and_publishes_zero(self):
         sys.path.insert(0, str(SOURCE_ROOT))
