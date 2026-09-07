@@ -83,3 +83,23 @@ poses / 50 Hz update attempts with 60 ms physical-pose delivery delay. The old
 latest-odom selection produced zero corrections in 100 attempts. Common-time
 selection produced 97, every attempt with available overlapping history. All
 18 localization tests passed and independent review closed the timing finding.
+
+## Separate frozen Ground/RM4D boundary discovered during A5
+
+Read-only public TF showed Ground base_link at map z=.36 and AUBO base at .482 m;
+their relative installation offset is .122 m. Frozen RM4D's placement generation
+instead puts its BUNKER reference at z=0 and AUBO at .122 m. Its .01 m standalone
+robot offset does not account for this .36 m difference, and the existing request
+adapter performs no height conversion. Both Ground launch geometry and request
+behavior predate this UAV localization repair and were not changed here.
+
+The same saved arm-relative target transform consequently reconstructs a TCP
+.36 m higher when placed at the SIM mount. This is not a measured MoveIt failure:
+the existing execution layer would plan again, and another configuration might
+succeed. It does mean nominal RM4D IK/margin validation is not validation of the
+same physical target under the current absolute-height contract.
+
+A5 is paused for the user's frozen frame/model decision; no calibration offset,
+baseline edit, Ground frame shift or A2 threshold change was introduced. The
+full geometry and remaining acquisition issue are documented in AGENT
+`docs/A5_GROUND_RM4D_HEIGHT_BOUNDARY.md`. No A5 E2E success is claimed.
