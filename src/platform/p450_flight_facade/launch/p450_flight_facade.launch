@@ -1,11 +1,15 @@
 <launch>
   <arg name="action_name" default="/uav1/runtime/flight"/>
   <arg name="odom_frame" default="uav1/odom"/>
+  <arg name="position_tolerance" default="0.15"/>
+  <arg name="fly_to_position_tolerance" default="$(arg position_tolerance)"/>
 
   <node pkg="p450_flight_facade" type="p450_flight_facade_node.py"
     name="p450_flight_facade" output="screen">
     <param name="action_name" value="$(arg action_name)"/>
     <param name="odom_frame" value="$(arg odom_frame)"/>
+    <param name="position_tolerance" value="$(arg position_tolerance)"/>
+    <param name="fly_to_position_tolerance" value="$(arg fly_to_position_tolerance)"/>
     <param name="command_topic" value="/uav1/prometheus/command"/>
     <param name="setup_topic" value="/uav1/prometheus/setup"/>
     <param name="state_topic" value="/uav1/prometheus/state"/>

@@ -11,6 +11,10 @@
 
   <exec_depend>gazebo_plugins</exec_depend>
   <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>tf</exec_depend>
   <exec_depend>bunker_navigation</exec_depend>
   <exec_depend>ground_manipulator_runtime</exec_depend>
   <exec_depend>livox_laser_gazebo_plugins</exec_depend>

@@ -60,6 +60,8 @@ class PrometheusFlightFacade:
         self._backend_max_age = self._positive("backend_max_age", 0.75)
         self._position_tolerance = self._positive(
             "position_tolerance", 0.15)
+        self._fly_to_position_tolerance = self._positive(
+            "fly_to_position_tolerance", self._position_tolerance)
         self._settle_speed = self._nonnegative("settle_speed", 0.15)
         self._takeoff_height_param = rospy.get_param(
             "~takeoff_height_param",
@@ -183,8 +185,8 @@ class PrometheusFlightFacade:
         else:
             self._publish_command(name, value)
 
-    def _feedback(self, target=None):
-        snapshot = self._snapshot()
+    def _feedback(self, target=None, snapshot=None):
+        snapshot = snapshot or self._snapshot()
         state, _control, odom = snapshot[:3]
         feedback = FlightCommandFeedback()
         if odom is not None:
@@ -249,14 +251,21 @@ class PrometheusFlightFacade:
             2.0 * (w * z + x * y),
             1.0 - 2.0 * (y * y + z * z))
 
-    def _target_in_odom(self, target):
+    def _target_in_odom(self, target, stamp=None):
         if not target.header.frame_id:
             raise TranslationError("FLY_TO target frame is empty")
+        transform_target = PoseStamped()
+        transform_target.header.frame_id = target.header.frame_id
+        transform_target.header.stamp = (
+            target.header.stamp if stamp is None else stamp)
+        transform_target.pose = target.pose
+        if transform_target.header.frame_id.lstrip("/") == "map":
+            transform_target.header.frame_id = "map"
         try:
             transform = self._tf_buffer.lookup_transform(
-                self._odom_frame, target.header.frame_id,
-                target.header.stamp, rospy.Duration(1.0))
-            transformed = do_transform_pose(target, transform)
+                self._odom_frame, transform_target.header.frame_id,
+                transform_target.header.stamp, rospy.Duration(1.0))
+            transformed = do_transform_pose(transform_target, transform)
         except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
                 tf2_ros.ExtrapolationException) as error:
             raise TranslationError("FLY_TO target cannot be transformed") from error
@@ -315,6 +324,37 @@ class PrometheusFlightFacade:
         self._abort("ROS shutdown")
 
     def _execute_fly_to(self, goal):
+        if goal.target.header.frame_id.lstrip("/") == "map":
+            rate = rospy.Rate(self._publish_rate)
+            while not rospy.is_shutdown():
+                if self._server.is_preempt_requested():
+                    self._preempted(FLY_TO)
+                    return
+                snapshot = self._snapshot()
+                if not self._health(snapshot):
+                    self._abort("Prometheus backend unavailable, stale, or failed")
+                    return
+                state, _control, odom = snapshot[:3]
+                target = self._target_in_odom(
+                    goal.target, odom.header.stamp)
+                if self._server.is_preempt_requested():
+                    self._preempted(FLY_TO)
+                    return
+                position = odom.pose.pose.position
+                arrived = position_complete(
+                        (position.x, position.y, position.z), target[:3],
+                        state.velocity, self._fly_to_position_tolerance,
+                        self._settle_speed)
+                operation = translation_for(FLY_TO, target)[0]
+                self._publish_operation(operation)
+                if arrived:
+                    self._succeed("target reached")
+                    return
+                self._feedback(target, snapshot)
+                rate.sleep()
+            self._abort("ROS shutdown")
+            return
+
         target = self._target_in_odom(goal.target)
         operation = translation_for(FLY_TO, target)[0]
 
@@ -323,7 +363,7 @@ class PrometheusFlightFacade:
             position = odom.pose.pose.position
             return position_complete(
                 (position.x, position.y, position.z), target[:3],
-                state.velocity, self._position_tolerance,
+                state.velocity, self._fly_to_position_tolerance,
                 self._settle_speed)
 
         if self._wait_native(FLY_TO, operation, arrived, target):
