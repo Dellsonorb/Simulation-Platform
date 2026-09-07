@@ -164,7 +164,7 @@ class SameTimeBufferTest(unittest.TestCase):
         message = TransformStamped()
         message.header.frame_id = parent
         message.child_frame_id = child
-        message.header.stamp = rospy.Time.from_sec(stamp)
+        message.header.stamp = stamp if isinstance(stamp, rospy.Time) else rospy.Time.from_sec(stamp)
         message.transform.translation.x, message.transform.translation.y, message.transform.translation.z = matrix[:3, 3]
         quaternion = localization.rotation_quaternion(matrix)
         message.transform.rotation.x, message.transform.rotation.y, message.transform.rotation.z, message.transform.rotation.w = quaternion
@@ -179,7 +179,7 @@ class SameTimeBufferTest(unittest.TestCase):
         self.insert(self.private, "world", "sim_uav1_body", 10.2,
                     rigid((2, 0, 2.045), (0, 0, 0.4)))
 
-        stamp, correction = localization.localization_at_latest_odom(
+        stamp, correction = localization.localization_at_latest_common_time(
             self.public, self.private, rospy.Time.from_sec(10.25), 0)
 
         self.assertEqual(rospy.Time.from_sec(10.1), stamp)
@@ -188,22 +188,88 @@ class SameTimeBufferTest(unittest.TestCase):
                                    self.map_world @ expected_truth, atol=1e-9)
         self.assertNotIn("sim_uav1_body", self.public.all_frames_as_yaml())
 
-    def test_missing_bracketing_truth_waits_for_next_attempt_without_fallback(self):
+    def test_missing_overlap_waits_for_next_attempt_without_fallback(self):
         self.insert(self.private, "world", "sim_uav1_body", 10.0, rigid((0, 0, 0.045)))
         with self.assertRaises(tf2_ros.ExtrapolationException):
-            localization.localization_at_latest_odom(
+            localization.localization_at_latest_common_time(
                 self.public, self.private, rospy.Time.from_sec(10.2), 0)
         self.insert(self.private, "world", "sim_uav1_body", 10.2, rigid((0, 0, 0.045)))
-        result = localization.localization_at_latest_odom(
+        result = localization.localization_at_latest_common_time(
             self.public, self.private, rospy.Time.from_sec(10.25), 0)
         self.assertEqual(rospy.Time.from_sec(10.1), result[0])
 
-    def test_stale_or_repeated_odom_is_skipped_before_truth_lookup(self):
-        self.assertIsNone(localization.localization_at_latest_odom(
+    def test_truth_history_newer_than_odom_has_no_unequal_time_fallback(self):
+        self.insert(self.private, "world", "sim_uav1_body", 10.2,
+                    rigid((0, 0, 0.045)))
+        with self.assertRaises(tf2_ros.ExtrapolationException):
+            localization.localization_at_latest_common_time(
+                self.public, self.private, rospy.Time.from_sec(10.25), 0)
+
+    def test_advancing_streams_keep_publishing_with_delayed_truth(self):
+        # Odometry advances at 20 Hz and truth at 100 Hz, but truth messages
+        # arrive 60 ms late. A 50 Hz timer must use the available common history.
+        self.public.clear()  # tf2 keeps the static map/world edge.
+        start_ns = 10000000000
+        next_odom_ns = next_truth_ns = start_ns
+        previous_ns = 0
+        corrections = []
+
+        def physical_at(stamp_ns):
+            elapsed = (stamp_ns - start_ns) / 1e9
+            return rigid((0.5 * elapsed, -0.25 * elapsed, 0.045 + 0.1 * elapsed),
+                         (0.0, 0.0, 0.2 * elapsed))
+
+        def estimated_at(stamp_ns):
+            elapsed = (stamp_ns - start_ns) / 1e9
+            return rigid((-0.3 + 0.6 * elapsed, 0.2 - 0.15 * elapsed,
+                          -0.005 + 0.12 * elapsed), (0.0, 0.0, -0.1 + 0.3 * elapsed))
+
+        for attempt in range(100):
+            now_ns = start_ns + attempt * 20000000
+            while next_odom_ns <= now_ns:
+                self.insert(self.public, "uav1/odom", "uav1/base_link",
+                            rospy.Time(0, next_odom_ns), estimated_at(next_odom_ns))
+                next_odom_ns += 50000000
+            while next_truth_ns <= now_ns - 60000000:
+                self.insert(self.private, "world", "sim_uav1_body",
+                            rospy.Time(0, next_truth_ns), physical_at(next_truth_ns))
+                next_truth_ns += 10000000
+            try:
+                sample = localization.localization_at_latest_common_time(
+                    self.public, self.private, rospy.Time(0, now_ns), previous_ns)
+            except (tf2_ros.LookupException, tf2_ros.ExtrapolationException):
+                continue
+            if sample is None:
+                continue
+            stamp, correction = sample
+            stamp_ns = stamp.to_nsec()
+            self.assertEqual(min(next_odom_ns - 50000000, next_truth_ns - 10000000),
+                             stamp_ns)
+            self.assertGreater(stamp_ns, previous_ns)
+            self.assertLessEqual(now_ns - stamp_ns, 500000000)
+            np.testing.assert_allclose(correction @ estimated_at(stamp_ns),
+                                       self.map_world @ physical_at(stamp_ns), atol=1e-10)
+            corrections.append(stamp_ns)
+            previous_ns = stamp_ns
+
+        self.assertEqual(97, len(corrections),
+                         "bounded truth delivery delay must not starve localization")
+
+    def test_stale_or_repeated_common_stamp_is_skipped(self):
+        self.insert(self.private, "world", "sim_uav1_body", 10.05,
+                    rigid((0, 0, 0.045)))
+        self.assertIsNone(localization.localization_at_latest_common_time(
             self.public, self.private, rospy.Time.from_sec(10.7), 0))
-        self.assertIsNone(localization.localization_at_latest_odom(
+        self.assertIsNone(localization.localization_at_latest_common_time(
             self.public, self.private, rospy.Time.from_sec(10.2),
-            rospy.Time.from_sec(10.1).to_nsec()))
+            rospy.Time.from_sec(10.05).to_nsec()))
+
+    def test_fresh_odom_does_not_make_stale_truth_usable(self):
+        self.insert(self.public, "uav1/odom", "uav1/base_link", 10.6, self.estimated)
+        self.insert(self.private, "world", "sim_uav1_body", 10.1,
+                    rigid((0, 0, 0.045)))
+        self.assertIsNone(localization.localization_at_latest_common_time(
+            self.public, self.private, rospy.Time.from_sec(10.65), 0))
 
     def test_unavailable_map_world_has_no_identity_fallback(self):
         self.public = tf2_ros.Buffer(debug=False)
@@ -211,7 +277,7 @@ class SameTimeBufferTest(unittest.TestCase):
         self.insert(self.private, "world", "sim_uav1_body", 10.0, rigid((0, 0, 0.045)))
         self.insert(self.private, "world", "sim_uav1_body", 10.2, rigid((0, 0, 0.045)))
         with self.assertRaises(tf2_ros.LookupException):
-            localization.localization_at_latest_odom(
+            localization.localization_at_latest_common_time(
                 self.public, self.private, rospy.Time.from_sec(10.25), 0)
 
     def offline_node(self):

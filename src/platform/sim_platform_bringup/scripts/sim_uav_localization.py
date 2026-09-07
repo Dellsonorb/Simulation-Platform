@@ -80,17 +80,22 @@ def transform_matrix(message):
                        (rotation.x, rotation.y, rotation.z, rotation.w))
 
 
-def localization_at_latest_odom(public_buffer, truth_buffer, now, previous_ns):
-    """Return (stamp, map/odom) only when truth is available at that odom stamp.
+def localization_at_latest_common_time(public_buffer, truth_buffer, now, previous_ns):
+    """Return (stamp, map/odom) at the newest fresh time in both pose histories.
 
-    All lookups use the default zero timeout. Missing data raises the buffer's
-    lookup exception so the caller can retry on the next timer tick.
+    Delivery delay can leave either stream ahead. Bound the candidate by both
+    latest stamps, then query both poses at that exact time. All lookups use the
+    default zero timeout; missing overlap raises the buffer's lookup exception
+    so the caller can retry on the next timer tick.
     """
-    estimated = public_buffer.lookup_transform(
+    latest_estimated = public_buffer.lookup_transform(
         "uav1/odom", "uav1/base_link", type(now)())
-    stamp = estimated.header.stamp
+    latest_physical = truth_buffer.lookup_transform(
+        "world", "sim_uav1_body", type(now)())
+    stamp = min(latest_estimated.header.stamp, latest_physical.header.stamp)
     if not fresh_stamp(stamp.to_nsec(), now.to_nsec(), previous_ns):
         return None
+    estimated = public_buffer.lookup_transform("uav1/odom", "uav1/base_link", stamp)
     physical = truth_buffer.lookup_transform("world", "sim_uav1_body", stamp)
     map_world = public_buffer.lookup_transform("map", "world", stamp)
     correction = map_to_odom(transform_matrix(physical), transform_matrix(estimated),
@@ -147,7 +152,7 @@ class SimUavLocalization:
 
     def publish_correction(self, _event):
         try:
-            sample = localization_at_latest_odom(
+            sample = localization_at_latest_common_time(
                 self.public_buffer, self.truth_buffer, self.ros.Time.now(), self.previous_ns)
             if sample is None:
                 return
