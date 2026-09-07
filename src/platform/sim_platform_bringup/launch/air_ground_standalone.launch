@@ -29,9 +29,8 @@
   <node pkg="tf2_ros" type="static_transform_publisher"
     name="sim_world_to_map" required="true"
     args="0 0 0 0 0 0 1 world map"/>
-  <node pkg="tf2_ros" type="static_transform_publisher"
-    name="sim_localization_uav1" required="true"
-    args="$(arg uav1_init_x) $(arg uav1_init_y) $(arg uav1_init_z) $(arg uav1_init_yaw) 0 0 map uav1/odom"/>
+  <node pkg="sim_platform_bringup" type="sim_uav_localization.py"
+    name="sim_localization_uav1" required="true" output="screen"/>
   <node pkg="tf2_ros" type="static_transform_publisher"
     name="sim_localization_ground" required="true"
     args="$(arg bunker_x) $(arg bunker_y) $(arg bunker_z) $(arg bunker_yaw) 0 0 map ground/odom"/>

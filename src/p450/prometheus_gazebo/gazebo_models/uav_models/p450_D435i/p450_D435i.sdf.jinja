@@ -1,6 +1,16 @@
 <?xml version='1.0'?>
 <sdf version='1.6'>
   <model name='p450_D435i'>
+    <!-- SIM-private stamped physical pose; public localization owns map/odom. -->
+    <plugin name='sim_base_pose' filename='libgazebo_ros_p3d.so'>
+      <bodyName>base_link</bodyName>
+      <frameName>world</frameName>
+      <topicName>/sim/uav1/base_pose</topicName>
+      <updateRate>100</updateRate>
+      <gaussianNoise>0</gaussianNoise>
+      <xyzOffset>0 0 0</xyzOffset>
+      <rpyOffset>0 0 0</rpyOffset>
+    </plugin>
     <!-- p450 body -->
     <link name='base_link'>
       <pose>0 0 0 0 0 0</pose>

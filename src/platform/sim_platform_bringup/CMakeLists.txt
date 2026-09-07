@@ -8,7 +8,13 @@ catkin_package()
 if(CATKIN_ENABLE_TESTING)
   catkin_add_nosetests(test/test_p450_launch_contract.py)
   catkin_add_nosetests(test/test_px4_sitl_node.py)
+  catkin_add_nosetests(test/test_sim_uav_localization.py)
 endif()
+
+catkin_install_python(
+  PROGRAMS scripts/sim_uav_localization.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 
 install(
   PROGRAMS scripts/px4_sitl_node.bash

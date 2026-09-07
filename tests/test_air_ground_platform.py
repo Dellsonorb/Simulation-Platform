@@ -69,14 +69,14 @@ class AirGroundPlatformTest(unittest.TestCase):
         }
         self.assertEqual({
             "sim_world_to_map": "0 0 0 0 0 0 1 world map",
-            "sim_localization_uav1": (
-                "$(arg uav1_init_x) $(arg uav1_init_y) "
-                "$(arg uav1_init_z) $(arg uav1_init_yaw) 0 0 "
-                "map uav1/odom"),
             "sim_localization_ground": (
                 "$(arg bunker_x) $(arg bunker_y) $(arg bunker_z) "
                 "$(arg bunker_yaw) 0 0 map ground/odom"),
         }, localization)
+        uav_localization = root.find("./node[@name='sim_localization_uav1']")
+        self.assertEqual('sim_platform_bringup', uav_localization.get('pkg'))
+        self.assertEqual('sim_uav_localization.py', uav_localization.get('type'))
+        self.assertEqual('true', uav_localization.get('required'))
 
     def test_shared_world_provides_ground_and_a_lidar_landmark(self):
         root = ET.parse(str(WORLD)).getroot()

@@ -490,10 +490,10 @@ class StandaloneLaunchContractTest(unittest.TestCase):
         self.assertEqual(
             "0 0 0 0 0 0 1 world map",
             localization_nodes["sim_world_to_map"].get("args"))
-        self.assertEqual(
-            "$(arg uav1_init_x) $(arg uav1_init_y) $(arg uav1_init_z) "
-            "$(arg uav1_init_yaw) 0 0 map uav1/odom",
-            localization_nodes["sim_localization_uav1"].get("args"))
+        self.assertEqual('sim_platform_bringup',
+                         localization_nodes["sim_localization_uav1"].get("pkg"))
+        self.assertEqual('sim_uav_localization.py',
+                         localization_nodes["sim_localization_uav1"].get("type"))
         arguments = {arg.get("name"): arg.get("default")
                      for arg in self.root.findall("./arg")}
         self.assertEqual({
@@ -773,11 +773,14 @@ class ImportedSensorEvidenceTest(unittest.TestCase):
         for token in forbidden:
             self.assertNotIn(token, active)
 
-    def test_active_vehicle_models_do_not_publish_gazebo_ground_truth(self):
+    def test_physical_pose_is_private_localization_input_not_native_odom(self):
         for model in (JINJA_MODEL, MID360_JINJA_MODEL):
             source = _read(model)
             self.assertNotIn("/prometheus/ground_truth", source)
-            self.assertNotIn("libgazebo_ros_p3d.so", source)
+            plugins = _xml(model).findall("./model/plugin[@filename='libgazebo_ros_p3d.so']")
+            self.assertEqual(1, len(plugins))
+            self.assertEqual('/sim/uav1/base_pose', plugins[0].findtext('topicName'))
+            self.assertEqual('base_link', plugins[0].findtext('bodyName'))
 
     def test_mid360_jinja_freezes_mount_ray_and_message_contract(self):
         root = ET.fromstring(_read(MID360_JINJA_MODEL))
