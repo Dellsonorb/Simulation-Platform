@@ -10,6 +10,7 @@
   <arg name="uav1_init_yaw" default="0.0"/>
   <arg name="px4_workdir" default="sitl_air_ground_0"/>
   <arg name="enable_mid360" default="false"/>
+  <arg name="flight_position_tolerance" default="0.15"/>
 
   <arg name="bunker_x" default="3.0"/>
   <arg name="bunker_y" default="0.0"/>
@@ -56,7 +57,9 @@
   <!-- Common robot-facing layers; REAL uses the same facade/navigation above
        its official native robot stacks. -->
   <include
-    file="$(find p450_flight_facade)/launch/p450_flight_facade.launch"/>
+    file="$(find p450_flight_facade)/launch/p450_flight_facade.launch">
+    <arg name="fly_to_position_tolerance" value="$(arg flight_position_tolerance)"/>
+  </include>
   <include
     file="$(find bunker_navigation)/launch/ground_navigation.launch"/>
 </launch>

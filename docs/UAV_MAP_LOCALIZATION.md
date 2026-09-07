@@ -84,6 +84,38 @@ latest-odom selection produced zero corrections in 100 attempts. Common-time
 selection produced 97, every attempt with available overlapping history. All
 18 localization tests passed and independent review closed the timing finding.
 
+## Fixed public map flight goals under dynamic localization
+
+A separate A5 flight diagnostic found that a once-converted native odom goal
+drifts in map as localization updates. In `natural-nav120-HH1UP2`, the second
+goal's public map error was 0.1494 m at facade success and 0.2366 m fifteen
+seconds later. Its original odom target had shifted approximately 0.159 m in
+map. This is distinct from ground-height calibration.
+
+For `map` / `/map` FLY_TO requests, the facade now re-expresses the unchanged
+public goal at each odometry snapshot timestamp. Command, completion and
+feedback use that same target; the final target is also published before
+success so native Prometheus retains the current command. Non-map requests
+retain their one-shot request-time semantics. There is no new controller,
+MAVROS setpoint publisher or localization adjustment, and no promise of map
+stationkeeping after the action ends or HOVER is requested.
+
+The FLY_TO-specific `fly_to_position_tolerance` defaults to the existing position
+tolerance. The demo/standalone launch option `flight_position_tolerance` forwards
+only to this FLY_TO parameter (default 0.15 m unchanged). TAKEOFF retains its
+original 0.15 m tolerance. The initial public probe with a shared 0.05 m value
+exhausted its 90 s TAKEOFF guard before any FLY_TO; separating the parameters
+avoids unintentionally changing native takeoff acceptance. A5's verification
+run uses FLY_TO 0.05 m, tighter than its unchanged 0.10 m settling gate.
+
+In the separate public-flight probe `map-fly-to-probe-NLl2v8`, both requested map
+goals completed: actual map position errors were 0.04808 m and 0.04968 m, with
+speeds 0.04093 m/s and 0.04855 m/s. Fifteen seconds after each action ended,
+errors were 0.14306 m and 0.11022 m: this deliberately does not claim ongoing
+map stationkeeping. Read-only P450/Ground TF and P450 sensor checks passed.
+The 12 focused facade/translation tests include terminal target publication,
+cancellation during TF lookup, and independent TAKEOFF/FLY_TO tolerances.
+
 ## Separate frozen Ground/RM4D boundary discovered during A5
 
 Read-only public TF showed Ground base_link at map z=.36 and AUBO base at .482 m;
@@ -99,7 +131,9 @@ the existing execution layer would plan again, and another configuration might
 succeed. It does mean nominal RM4D IK/margin validation is not validation of the
 same physical target under the current absolute-height contract.
 
-A5 is paused for the user's frozen frame/model decision; no calibration offset,
-baseline edit, Ground frame shift or A2 threshold change was introduced. The
-full geometry and remaining acquisition issue are documented in AGENT
-`docs/A5_GROUND_RM4D_HEIGHT_BOUNDARY.md`. No A5 E2E success is claimed.
+The user subsequently authorized an explicit A5 frame bridge and a separate
+task-domain RM4D runtime asset. Those changes live in AGENT, with no baseline
+edit, Ground frame shift or A2 threshold change. The integration asset separates
+workspace coverage [-0.25,1.3] m from its calibrated collision floor -0.472 m.
+See AGENT `docs/A5_TASK_DOMAIN_ASSET.md` for the derivation and actual SIM
+collision-aware planning checks. A5 E2E success is not yet claimed.

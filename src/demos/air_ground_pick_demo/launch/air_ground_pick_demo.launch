@@ -1,6 +1,7 @@
 <launch>
   <arg name="gui" default="false"/>
   <arg name="enable_mid360" default="false"/>
+  <arg name="flight_position_tolerance" default="0.15"/>
   <arg name="run_demo" default="true"/>
   <arg name="start_moveit" default="true"/>
   <arg name="placement_mode" default="standoff"/>
@@ -18,6 +19,7 @@
     file="$(find sim_platform_bringup)/launch/air_ground_standalone.launch">
     <arg name="gui" value="$(arg gui)"/>
     <arg name="enable_mid360" value="$(arg enable_mid360)"/>
+    <arg name="flight_position_tolerance" value="$(arg flight_position_tolerance)"/>
     <arg name="px4_workdir" value="$(arg px4_workdir)"/>
     <arg name="bunker_x" value="$(arg bunker_x)"/>
     <arg name="bunker_y" value="$(arg bunker_y)"/>
