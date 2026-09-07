@@ -25,8 +25,8 @@ frameName world, zero noise/offset, 100 Hz, topic /sim/uav1/base_pose. It does n
 publish public TF or feed the AGENT directly. Normal and MID360 model profiles
 both expose this localization input.
 
-At the latest odom -> base TF timestamp t for which private physical pose can be
-interpolated, publish:
+At the newest fresh timestamp t common to both pose histories (the earlier of
+their latest stamps, with both poses queried at exactly t), publish:
 
     T_map_odom(t) = T_map_world * T_world_base(t) * inverse(T_odom_base(t))
 
@@ -34,6 +34,8 @@ Use full SE(3), not scalar altitude subtraction. Cache the private pose in a loc
 tf2 buffer, never broadcast its helper frame. Do not use clamped display odometry
 (the existing Odometry topic clamps z<=0 to .01 while TF does not). Publish once
 per matched stamp; skip unavailable/stale transforms without inventing a pose.
+Choosing the common time avoids starving localization when one continuously
+advancing stream is delivered later than the other.
 The existing node remains the only map -> odom authority. No new sensor estimator,
 SLAM package, localization benchmark or safety framework is introduced.
 
