@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import threading
+from types import SimpleNamespace
 import unittest
 import warnings
 import xml.etree.ElementTree as ET
@@ -756,6 +757,53 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
                 ({"stamp": 6.9, "frame": "camera"},),
                 status_time=7.0, expected_stamp=6.9,
                 expected_frame="map", maximum_age=1.0)
+        with self.assertRaises(checker.DemoCheckError):
+            checker.observation_summary(
+                ({"stamp": 6.5, "frame": "map"},),
+                status_time=7.0, expected_stamp=6.9,
+                expected_frame="map", maximum_age=1.0)
+
+    def test_demo_checker_retains_handoff_observations_until_lift(self):
+        checker = _load_module(
+            DEMO_CHECKER, "air_ground_pick_observation_retention_checker_test")
+
+        def pose(stamp):
+            return SimpleNamespace(header=SimpleNamespace(
+                frame_id="map", stamp=SimpleNamespace(to_sec=lambda: stamp)))
+
+        for channel, state in (("air", "AIR_HANDOFF"),
+                               ("ground", "GROUND_REFINED")):
+            with self.subTest(channel=channel):
+                monitor = checker.DemoMonitor(
+                    rospy=None, goal_succeeded=3, target_model="pick_target")
+                events = self._valid_demo_status_events()
+                handoff = next(event for event in events
+                               if event["state"] == state)
+                callback = getattr(monitor, channel + "_pose")
+                observations_key = channel + "_observations"
+                callback(pose(handoff["observation_stamp"]))
+                initial = checker.observation_summary(
+                    monitor.snapshot()[observations_key], handoff["ros_time"],
+                    handoff["observation_stamp"], "map", maximum_age=1.0)
+                for event in events[:-1]:
+                    monitor.status(SimpleNamespace(data=json.dumps(event)))
+
+                for index in range(6001):
+                    callback(pose(16.0 + index / 25.0))
+                events[-1]["ros_time"] = 257.0
+                monitor.status(SimpleNamespace(data=json.dumps(events[-1])))
+
+                captured = monitor.snapshot()
+                self.assertTrue(monitor.terminal.is_set())
+                self.assertIsNone(captured["error"])
+                self.assertEqual("LIFT", captured["events"][-1]["state"])
+                try:
+                    final = checker.observation_summary(
+                        captured[observations_key], handoff["ros_time"],
+                        handoff["observation_stamp"], "map", maximum_age=1.0)
+                except checker.DemoCheckError as error:
+                    self.fail(str(error))
+                self.assertEqual(initial, final)
 
     def test_demo_checker_requires_one_flight_controller_contact_and_lift(self):
         checker = _load_module(
