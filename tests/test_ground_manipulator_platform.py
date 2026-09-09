@@ -496,7 +496,7 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
         self.assertEqual("ground_manipulator_runtime", root.findtext("name"))
         dependencies = {
             item.text for tag in (
-                "build_depend", "build_export_depend", "exec_depend")
+                "depend", "build_depend", "build_export_depend", "exec_depend")
             for item in root.findall(tag)
         }
         self.assertTrue({

@@ -33,11 +33,15 @@ class OrchestratorContractTest(unittest.TestCase):
         lowered = source.lower()
         for forbidden in (
                 "gazebo_msgs", "contactsstate", "uavcommand", "uavsetup",
-                "uavcontrolstate", "laserscan", "twist", "world",
+                "uavcontrolstate", "laserscan", "twist", "/gazebo/",
                 "/ground/cmd_vel", "/ground/nav_cmd_vel",
                 "/uav1/prometheus/command", "/uav1/prometheus/setup",
-                "bilateral", "teleport", "attach"):
+                "bilateral", "teleport", "gazebo_ros_link_attacher"):
             self.assertNotIn(forbidden, lowered)
+        # Planning-scene payload modeling is permitted; physical simulator
+        # attachment and backend state access remain forbidden above.
+        for required in ("GetPlanningScene", "ApplyPlanningScene", "GetStateValidity"):
+            self.assertIn(required, source)
 
     def test_config_names_map_and_common_runtime_endpoints(self):
         config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))

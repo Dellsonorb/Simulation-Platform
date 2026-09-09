@@ -22,6 +22,7 @@
 #include <ros/callback_queue.h>
 #include <ros/ros.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include "ground_dynamics_trace.hh"
 #include "planar_twist.hh"
 
 namespace gazebo {
@@ -105,6 +106,10 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
     running_.store(true);
     callback_thread_ = std::thread(
         &BunkerPlanarMovePlugin::RunCallbackQueue, this);
+    if (dynamics_trace_.Open(model_, base_link_, world_)) {
+      update_end_connection_ = event::Events::ConnectWorldUpdateEnd(
+          std::bind(&BunkerPlanarMovePlugin::TraceUpdateEnd, this));
+    }
     update_connection_ = event::Events::ConnectWorldUpdateBegin(
         std::bind(&BunkerPlanarMovePlugin::Update, this));
     ROS_INFO_STREAM("BUNKER planar move ready on "
@@ -113,8 +118,10 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
 
  private:
   void Shutdown() {
-    update_connection_.reset();
     running_.store(false);
+    update_end_connection_.reset();
+    update_connection_.reset();
+    dynamics_trace_.Close();
     callback_queue_.disable();
     command_subscriber_.shutdown();
     if (node_) {
@@ -165,6 +172,10 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
     return command_;
   }
 
+  void TraceUpdateEnd() {
+    if (running_.load()) dynamics_trace_.Capture("update_end");
+  }
+
   void Update() {
     if (!running_.load()) {
       return;
@@ -183,9 +194,11 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
         0.0);
     const ignition::math::Vector3d desired_angular_velocity(0.0, 0.0, command.angular.z);
     const auto origin_to_cog = base_link_->WorldCoGPose().Pos() - base_pose.Pos();
+    dynamics_trace_.Capture("before_base_set");
     base_link_->SetLinearVel(CoGVelocity(desired_origin_velocity,
                                        desired_angular_velocity, origin_to_cog));
     base_link_->SetAngularVel(desired_angular_velocity);
+    dynamics_trace_.Capture("after_base_set");
 
     const common::Time now = world_->SimTime();
     const double elapsed = (now - last_update_time_).Double();
@@ -255,6 +268,8 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
   physics::WorldPtr world_;
   ignition::math::Pose3d initial_base_pose_;
   event::ConnectionPtr update_connection_;
+  event::ConnectionPtr update_end_connection_;
+  ground_dynamics::Trace dynamics_trace_;
   std::unique_ptr<ros::NodeHandle> node_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   ros::Subscriber command_subscriber_;

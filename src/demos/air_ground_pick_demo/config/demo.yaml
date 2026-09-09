@@ -51,6 +51,7 @@ ground_observation_max_age: 1.0
 ground_observation_mode: camera_centered_v1
 
 move_group: manipulator
+full_robot_manipulation: false
 end_effector_link: ground/gripper_tcp_link
 planner_id: RRTConnectkConfigDefault
 moveit_server_timeout: 30.0
