@@ -81,4 +81,29 @@ native TCPROS contrast (not MoveIt timing) measures 300 connections versus one,
 0.503 versus 0.119 ms mean per call, with identical responses. Reuse the
 serialized read-only validity connection in clearance mode only. Connection
 failures still propagate; no retry, dropped samples or increased guard budget.
-Actual recovery remains for the separately declared engineering regression.
+The separately declared start4 completes the entire local chain: target/TCP
+rise149.139/149.731mm, real grasp and bounded retention pass. The actual loaded
+command checks18,152states. Changed fresh perception/MoveIt trajectories mean
+total run-time reduction is not an identical-trajectory timing comparison.
+
+Final natural start5 uses normal P450 perception and three real MID360 windows,
+not an archived station. The common preview accepts program-selected source585
+at `[2.425755006, -0.623608986, 2.268928028]`; actual arrival and D435 refinement
+are revalidated. All stages through actual grip, attached lift and retention
+pass, with20,688checked loaded states. Physical target/TCP rise148.951/149.480mm;
+maximum target-in-hand displacement2.572mm during lift and0.00965mm during the
+original0.829sim-second retention. Both six-arm public velocity streams match
+the actual preceding1ms position increments; native discrepancy and real speed
+peaks remain in diagnostics. Gripper still lacks an independent native1kHz
+reference. The first candidate/seed/yaw passed, so this does not demonstrate
+online fallback reliability or calibrated clearance under arbitrary errors.
+The natural gripper close returns a contact-stalled `ABORTED/-4` action
+(0.080112rad path error). Only the unchanged fresh true-contact/minimum-closure
+rule accepts that physical grip; it is not ordinary gripper action success.
+Allfour arm actions actually report success; no arm abort is accepted.
+
+Batch stops at5/6starts: three preserved failures, two successes, zero startup
+invalids. It is not a Generic/Ours policy comparison or a formal result. Final
+native SIM127 and AGENT187 targeted tests pass; core AGENT656run/22skipped.
+All builds pass. Dedicated ports11951/11952 are clear; unrelated old simulator
+preserved. No change to Hard sensing, physical acceptance, or the RM4D assets.
