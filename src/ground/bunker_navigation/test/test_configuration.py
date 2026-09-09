@@ -17,6 +17,21 @@ class ConfigurationTest(unittest.TestCase):
         with open(os.path.join(PACKAGE, relative)) as stream:
             return stream.read()
 
+    def test_xy_latch_uses_default_stop_rotate_controller_namespace(self):
+        # ROS navigation 1.17.3 DWA constructs LatchedStopRotateController()
+        # without a name: it reads the move_base private namespace, not DWA's.
+        config = yaml.safe_load(self.read('config/local_planner.yaml'))
+        self.assertIs(config.get('latch_xy_goal_tolerance'), True)
+        self.assertNotIn('latch_xy_goal_tolerance', config['DWAPlannerROS'])
+        self.assertEqual(config['DWAPlannerROS']['xy_goal_tolerance'], 0.06)
+        self.assertEqual(config['DWAPlannerROS']['yaw_goal_tolerance'], 0.08)
+        root = ET.fromstring(self.read('launch/ground_navigation.launch'))
+        node = root.find(".//node[@type='move_base']")
+        loads = [p for p in node.findall('rosparam')
+                 if p.get('file', '').endswith('/config/local_planner.yaml')]
+        self.assertEqual(len(loads), 1)
+        self.assertIsNone(loads[0].get('ns'))
+
     def test_navigation_launch_is_isolated_from_visual_pick(self):
         text = self.read('launch/navigation_demo.launch')
         root = ET.fromstring(text)
