@@ -93,6 +93,13 @@ class BunkerRuntimePackageTest(unittest.TestCase):
         self.assertIn("callback_thread_.join()", source)
         self.assertIn("GetLink(StripLeadingSlash(robot_base_frame_))", source)
         self.assertIn("base_link_->SetLinearVel", source)
+        # Feedback is the physics result, sampled before imposing the next
+        # velocity command. Reading immediately after Set* merely echoes it.
+        update = source[source.index('  void Update()'):source.index('  void PublishOdometry')]
+        self.assertLess(update.index('base_link_->WorldLinearVel()'),
+                        update.index('base_link_->SetLinearVel('))
+        self.assertLess(update.index('base_link_->WorldAngularVel()'),
+                        update.index('base_link_->SetAngularVel('))
         self.assertIn("base_link_->SetAngularVel", source)
         self.assertIn("bunker_msgs::BunkerStatus", source)
         self.assertIn("status_publisher_", source)

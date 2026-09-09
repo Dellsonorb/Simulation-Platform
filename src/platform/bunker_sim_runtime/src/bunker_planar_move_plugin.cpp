@@ -22,6 +22,7 @@
 #include <ros/callback_queue.h>
 #include <ros/ros.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include "planar_twist.hh"
 
 namespace gazebo {
 namespace {
@@ -171,18 +172,24 @@ class BunkerPlanarMovePlugin final : public ModelPlugin {
     const geometry_msgs::Twist command = CurrentCommand();
     const ignition::math::Pose3d base_pose = base_link_->WorldPose();
     const double yaw = base_pose.Rot().Yaw();
-    base_link_->SetLinearVel(ignition::math::Vector3d(
+    // Feedback must describe the completed physics step, not the command
+    // imposed below. At low speed contacts can stop the base even while the
+    // requested velocity is nonzero; echoing that request misleads DWA.
+    const ignition::math::Vector3d world_linear = base_link_->WorldLinearVel();
+    const ignition::math::Vector3d world_angular = base_link_->WorldAngularVel();
+    const ignition::math::Vector3d desired_origin_velocity(
         command.linear.x * std::cos(yaw) - command.linear.y * std::sin(yaw),
         command.linear.y * std::cos(yaw) + command.linear.x * std::sin(yaw),
-        0.0));
-    base_link_->SetAngularVel(ignition::math::Vector3d(
-        0.0, 0.0, command.angular.z));
+        0.0);
+    const ignition::math::Vector3d desired_angular_velocity(0.0, 0.0, command.angular.z);
+    const auto origin_to_cog = base_link_->WorldCoGPose().Pos() - base_pose.Pos();
+    base_link_->SetLinearVel(CoGVelocity(desired_origin_velocity,
+                                       desired_angular_velocity, origin_to_cog));
+    base_link_->SetAngularVel(desired_angular_velocity);
 
     const common::Time now = world_->SimTime();
     const double elapsed = (now - last_update_time_).Double();
     last_update_time_ = now;
-    const ignition::math::Vector3d world_linear = base_link_->WorldLinearVel();
-    const ignition::math::Vector3d world_angular = base_link_->WorldAngularVel();
     const double linear_velocity =
         world_linear.X() * std::cos(yaw) + world_linear.Y() * std::sin(yaw);
     const double angular_velocity = world_angular.Z();

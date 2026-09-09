@@ -78,6 +78,11 @@ class CommonNavigationTest(unittest.TestCase):
         self.assertEqual(0.06, planner["xy_goal_tolerance"])
         self.assertEqual(0.08, planner["yaw_goal_tolerance"])
 
+    def test_point_goal_replans_do_not_periodically_clear_dwa_xy_latch(self):
+        config = yaml.safe_load((PACKAGE / 'config/move_base.yaml').read_text())
+        self.assertEqual(0.0, config['planner_frequency'])
+        self.assertEqual(15.0, config['controller_frequency'])
+
     def test_stop_helper_cancels_navigation_and_publishes_zero(self):
         sys.path.insert(0, str(SOURCE_ROOT))
         try:
