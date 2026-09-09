@@ -396,6 +396,75 @@ class ManipulationSceneTest(unittest.TestCase):
         boundary = .0952 * (1.0 - (result.command_position + .10)/.93)
         self.assertAlmostEqual(result.required_opening, boundary)
 
+    def test_contact_geometry_preserves_open_calibration_and_actual_target_span(self):
+        self.assertTrue(hasattr(self.helper, "ag95_contact_geometry"))
+        geometry = self.helper.ag95_contact_geometry((.24, .053, .115), .0952, .93, .0156)
+        self.assertAlmostEqual(.45737440709566757, geometry.q_contact)
+        self.assertAlmostEqual(.0132905620873464, geometry.delta)
+        self.assertAlmostEqual(.0023094379126535995, geometry.pad_edge)
+        opened = self.helper.ag95_contact_geometry((.24, .0952, .115), .0952, .93, .0156)
+        self.assertAlmostEqual(0., opened.q_contact)
+        self.assertAlmostEqual(.0156, opened.pad_edge)
+
+    def test_contact_geometry_rejects_invalid_or_unreachable_calibration(self):
+        self.assertTrue(hasattr(self.helper, "ag95_contact_geometry"))
+        for size, opening, limit, edge in (
+                ((.24, .10, .115), .0952, .93, .0156),
+                ((.24, .053, .115), .0952, .1, .0156),
+                ((.24, .053, .115), .0952, .93, .001),
+                ((.24, .053, .115), .0952, .93, float("nan"))):
+            with self.subTest(size=size, limit=limit, edge=edge):
+                with self.assertRaises(self.helper.SceneError):
+                    self.helper.ag95_contact_geometry(size, opening, limit, edge)
+
+    def test_contact_pad_shift_matches_rendered_urdf_collision_mesh(self):
+        self.assertTrue(hasattr(self.helper, "ag95_contact_geometry"))
+        from ground_manipulator_runtime.renderer import render_ground_robot
+        from tf.transformations import euler_matrix, rotation_matrix
+        robot = ET.fromstring(render_ground_robot(
+            ROOT / "src/platform/ground_manipulator_runtime/urdf/ground_robot.urdf.xacro"))
+        parents = {joint.find("child").get("link"): joint for joint in robot.findall("joint")}
+        links = {link.get("name"): link for link in robot.findall("link")}
+        def origin(node):
+            if node is None:
+                return np.eye(4)
+            result = euler_matrix(*map(float, node.get("rpy", "0 0 0").split()))
+            result[:3, 3] = list(map(float, node.get("xyz", "0 0 0").split()))
+            return result
+        def transform(link, q):
+            if link == "ground/ee_link":
+                return np.eye(4)
+            joint = parents[link]
+            local = origin(joint.find("origin"))
+            if joint.get("type") != "fixed":
+                mimic = joint.find("mimic")
+                value = q if mimic is None else q * float(mimic.get("multiplier", "1")) + float(mimic.get("offset", "0"))
+                local = local @ rotation_matrix(value, list(map(float, joint.find("axis").get("xyz").split())))
+            return transform(joint.find("parent").get("link"), q) @ local
+        geometry = self.helper.ag95_contact_geometry((.24, .053, .115), .0952, .93, .0156)
+        for name in ("ground/left_finger_pad", "ground/right_finger_pad"):
+            collision = links[name].find("collision")
+            mesh = collision.find("geometry/mesh")
+            relative = mesh.get("filename").split("package://dh_ag95_description/")[1]
+            data = (ROOT / "src/vendor/dh_ag95_description" / relative).read_bytes()
+            count = struct.unpack_from("<I", data, 80)[0]
+            self.assertEqual(84 + 50 * count, len(data))
+            dtype = np.dtype([("normal", "<f4", (3,)), ("vertices", "<f4", (3, 3)), ("attribute", "<u2")])
+            points = np.frombuffer(data, dtype=dtype, count=count, offset=84)["vertices"].reshape(-1, 3).astype(float)
+            points *= np.array(list(map(float, mesh.get("scale", "1 1 1").split())))
+            points = np.c_[points, np.ones(len(points))]
+            edges = []
+            for q in (0., geometry.q_contact):
+                tcp = np.linalg.inv(transform("ground/gripper_tcp_link", q))
+                vertices = (tcp @ transform(name, q) @ origin(collision.find("origin")) @ points.T).T[:, :3]
+                edges.append(-vertices[:, 0].max())  # TCP +X points down in a top grasp.
+                if q == geometry.q_contact:
+                    self.assertAlmostEqual(.053, 2 * np.abs(vertices[:, 1]).min(), delta=2e-7)
+            self.assertAlmostEqual(.01555943818245381, edges[0], places=12)
+            self.assertAlmostEqual(geometry.delta, edges[0] - edges[1], places=12)
+            # Preserve the configured 40.56-micrometre rounding, not a fitted replacement.
+            self.assertAlmostEqual(.0156 - edges[0], geometry.pad_edge - edges[1], places=12)
+
     def test_preshape_rejects_infeasible_target_or_missing_tracking_room(self):
         for size, opening, limit, margin, tracking in (
                 ((.24, .10, .115), .0952, .93, .002, .10),

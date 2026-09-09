@@ -98,6 +98,41 @@ payloads and unrelated ACM entries. Mock ROS message tests alone missed the
 initial attachment-composition and redundant-REMOVE defects; these were found
 offline before activating the new planning path.
 
+## Contact-configuration grasp height
+
+Checkpoint86abd7a preserves the initial full-robot path with its old
+fully-open pad-height assumption (used in AGENT development starts06/07).
+Start07 completes aerial confirmation, real navigation, refinement, pregrasp
+and descent, then its hypothetical closure sweep rejects an inner-knuckle/
+perceived-target intersection before any physical close command.
+
+Rendered URDF and pad collision-mesh FK independently show that the existing
+`finger_pad_lower_edge_offset=0.0156m` describes the fully-open pad edge above
+TCP. Parallel finger closure changes that offset. For link length L=.055m and
+alpha=44.691deg, the actual aperture is
+`w(q)=.0952+2L[cos(alpha+q)-cos(alpha)]`. The physical53mm target width gives
+q_contact=.4573744071rad and downward pad displacement
+`delta=L[sin(alpha+q_contact)-sin(alpha)]=.0132905621m`.
+
+The opt-in Ground generator uses `pad_edge_contact=.0156-delta`, retaining the
+existing20mm overlap, relative pregrasp/lift heights, yaw and XY. Thus refined
+Ground TCP rises13.290562mm; this is not an outcome-fitted Z offset. The
+nominal pad mesh then has20.040562mm overlap (the40.56µm difference is the
+existing open-edge calibration rounding). Physical target width, not preshape
+width plus margin, determines q_contact. The same helper now drives closure
+geometry, and the A5 grasp-seeded approach uses the same Ground generator.
+Default/legacy paths and initial aerial/RM4D queries remain unchanged; refined
+Ground geometry is collision-aware revalidated before execution.
+
+An offline41-sample comparison using start07's accepted target and public
+TF/JointState reproduces seven terminal forbidden intersections with old
+measured geometry and none with the correction. The old nominal geometry
+alone is collision-free: excessive insertion plus actual tracking error
+causes the veto. The recorded lateral error still produces one-sided pad
+contact first; this correction is not a bilateral-contact or payload-lift
+certificate. No knuckle collision allowance, observation/force threshold,
+tracking limit, target dimension, or real grasp criterion is relaxed.
+
 Final bounded online results and limits are recorded in the AGENT repository's
 `docs/GROUND_MANIPULATION_BATCH_RESULTS.md`; raw/derived development data live
 under `outputs/development/ground-manipulation-batch/`. No formal run is included.

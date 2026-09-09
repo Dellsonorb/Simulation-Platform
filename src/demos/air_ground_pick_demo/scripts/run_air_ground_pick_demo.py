@@ -1343,14 +1343,12 @@ class AirGroundPickDemo:
         try:
             if full:
                 self._set_manipulation_contact(True)
-                # AG95 URDF: 55-mm outer-to-finger lever, origin 44.691deg.
                 # Validate up to physical pad contact, not unreachable free
                 # closure at the controller's unchanged 0.70-rad force goal.
-                alpha = math.radians(44.691)
-                contact_cos = math.cos(alpha) + (self._target_size[1]-self._maximum_gripper_opening)/.110
-                if not -1.0 <= contact_cos <= 1.0:
-                    raise DemoError("target has no calibrated AG95 pad-contact position")
-                contact_joint = math.acos(contact_cos) - alpha
+                geometry = manipulation_scene.ag95_contact_geometry(
+                    self._target_size, self._maximum_gripper_opening,
+                    self._maximum_gripper_joint, self._finger_pad_lower_edge_offset)
+                contact_joint = geometry.q_contact
                 checked_states = self._check_gripper_sweep(contact_joint, "AG95 physical closure")
                 self._publish_status(
                     "GROUND_GRASP_GEOMETRY", contact_joint=contact_joint, checked_states=checked_states,
@@ -1381,11 +1379,23 @@ class AirGroundPickDemo:
                     raise DemoError("%s; grasp contact cleanup failed: %s" % (error, cleanup_error)) from error
             raise
 
-    def _pick_and_lift(self, sensor_pose, target):
-        generated = generate_top_down_grasp(
+    def _generate_ground_grasp(self, target):
+        """Ground refinement only; aerial RM4D queries retain legacy geometry."""
+        pad_edge = self._finger_pad_lower_edge_offset
+        if getattr(self, "_full_robot_manipulation", False):
+            try:
+                pad_edge = manipulation_scene.ag95_contact_geometry(
+                    self._target_size, self._maximum_gripper_opening,
+                    self._maximum_gripper_joint, pad_edge).pad_edge
+            except manipulation_scene.SceneError as error:
+                raise DemoError("Ground contact geometry is invalid: %s" % error) from error
+        return generate_top_down_grasp(
             target, self._target_size, self._pregrasp_height,
-            self._lift_height, self._finger_pad_lower_edge_offset,
+            self._lift_height, pad_edge,
             self._contact_overlap, self._surface_clearance)
+
+    def _pick_and_lift(self, sensor_pose, target):
+        generated = self._generate_ground_grasp(target)
         group = self._initialize_moveit()
         planning_frame = group.get_planning_frame()
         messages = tuple(
@@ -1396,6 +1406,14 @@ class AirGroundPickDemo:
             for pose in (generated.pregrasp, generated.grasp, generated.lift))
         pregrasp, grasp, lift = messages
         if getattr(self, "_full_robot_manipulation", False):
+            geometry = manipulation_scene.ag95_contact_geometry(
+                self._target_size, self._maximum_gripper_opening,
+                self._maximum_gripper_joint, self._finger_pad_lower_edge_offset)
+            self._publish_status(
+                "GROUND_GRASP_CALIBRATION", contact_joint=geometry.q_contact,
+                open_pad_edge=self._finger_pad_lower_edge_offset, contact_pad_edge=geometry.pad_edge,
+                pad_down_shift=geometry.delta, contact_overlap=self._contact_overlap,
+                grasp_tcp_map_z=generated.grasp.position[2])
             self._update_manipulation_target(sensor_pose, source="accepted_refined")
             self._preshape_gripper()
         self._publish_status("PREGRASP")

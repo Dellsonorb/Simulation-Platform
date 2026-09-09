@@ -39,6 +39,7 @@ TARGET_ID = "perceived_pick_target"
 FINGER_LINKS = ("ground/left_finger", "ground/right_finger",
                 "ground/left_finger_pad", "ground/right_finger_pad")
 Preshape = namedtuple("Preshape", "command_position closure_limit required_opening predicted_opening")
+ContactGeometry = namedtuple("ContactGeometry", "q_contact pad_edge delta")
 
 
 class SceneError(RuntimeError):
@@ -239,6 +240,35 @@ def planning_start_state(scene_robot_state, measured_joint_state):
     state.joint_state = copy.deepcopy(measured_joint_state)
     state.is_diff = True
     return state
+
+
+def ag95_contact_geometry(target_size, maximum_opening, maximum_joint_position, open_pad_edge):
+    """URDF linkage geometry at nominal pad contact, not contact confirmation.
+
+    The configured pad edge is above the TCP with fully open fingers. Closing
+    translates the parallel pads along TCP +X (down in the top grasp). Keep
+    that open calibration and subtract its 55-mm-link displacement; do not
+    fit insertion depth or change the requested overlap. The physical target
+    span sets contact, whereas the opening margin belongs only to preshape.
+    """
+    try:
+        feasibility = check_target_feasibility(target_size, maximum_opening, 0.)
+        conservative_jaw_opening(0., maximum_opening, maximum_joint_position)
+        edge = float(open_pad_edge)
+        alpha, length = math.radians(44.691), .055  # Rendered AG95 URDF.
+        cosine = math.cos(alpha) + (feasibility.grasp_span - float(maximum_opening)) / (2 * length)
+        if not feasibility.feasible or not -1. <= cosine <= 1.:
+            raise SceneError("target has no calibrated AG95 pad-contact position")
+        # The exactly-open boundary is known analytically; avoid acos roundoff.
+        joint = 0. if feasibility.grasp_span == float(maximum_opening) else math.acos(cosine) - alpha
+        delta = length * (math.sin(alpha + joint) - math.sin(alpha))
+        pad_edge = edge - delta
+        if (not math.isfinite(edge) or edge <= 0. or
+                not 0. <= joint <= float(maximum_joint_position) or pad_edge <= 0.):
+            raise SceneError("AG95 contact geometry exceeds calibrated stroke or pad-edge range")
+    except (GraspError, ValueError, TypeError, OverflowError) as error:
+        raise SceneError("invalid target or AG95 contact calibration") from error
+    return ContactGeometry(joint, pad_edge, delta)
 
 
 def required_opening_preshape(target_size, maximum_opening, maximum_joint_position,

@@ -315,6 +315,26 @@ class FullRobotManipulationTest(unittest.TestCase):
         with self.assertRaisesRegex(demo.DemoError, "opening is too small"):
             self.owner._preshape_gripper()
 
+    def test_ground_grasp_correction_is_opt_in_and_preserves_relative_motion(self):
+        generate = self.require_hook("_generate_ground_grasp")
+        target = (2., .1, .0575, .2)
+        self.owner._full_robot_manipulation = False
+        legacy = generate(target)
+        self.assertAlmostEqual(.0794, legacy.grasp.position[2])
+        self.owner._full_robot_manipulation = True
+        corrected = generate(target)
+        for old, new in zip(legacy, corrected):
+            self.assertEqual(old.position[:2], new.position[:2])
+            self.assertEqual(old.orientation, new.orientation)
+            self.assertAlmostEqual(.0132905620873464, new.position[2] - old.position[2])
+        self.assertAlmostEqual(.0926905620873464, corrected.grasp.position[2])
+        self.assertAlmostEqual(self.owner._pregrasp_height,
+                               corrected.pregrasp.position[2] - corrected.grasp.position[2])
+        self.assertAlmostEqual(self.owner._lift_height,
+                               corrected.lift.position[2] - corrected.grasp.position[2])
+        self.assertEqual(.020, self.owner._contact_overlap)
+        self.assertEqual([], self.statuses)  # Cache queries must not publish execution evidence.
+
     def test_invalid_full_robot_sweep_prevents_gripper_actuation(self):
         self.update_target()
         self.valid = False
@@ -396,13 +416,18 @@ class FullRobotManipulationTest(unittest.TestCase):
         def pregrasp(target, continuation=None):
             self.events.append("pregrasp_motion")
             self.assertEqual(set(), self.allowed_links())
+            self.assertAlmostEqual(.0926905620873464 + self.owner._pregrasp_height,
+                                   target.pose.position.z)
             return target
         def cartesian(target, label):
             self.events.append(label)
             if label == "grasp approach":
                 self.assertEqual(set(), self.allowed_links())
+                self.assertAlmostEqual(.0926905620873464, target.pose.position.z)
             else:
                 self.assertTrue(self.scene.robot_state.attached_collision_objects)
+                self.assertAlmostEqual(.0926905620873464 + self.owner._lift_height,
+                                       target.pose.position.z)
                 raise demo.DemoError("lift execution failed")
             return target
         self.owner._execute_pregrasp = pregrasp
@@ -412,9 +437,15 @@ class FullRobotManipulationTest(unittest.TestCase):
         expected = ["target_update", "preshape", "PREGRASP", "pregrasp_motion", "GRASP",
                     "grasp approach", "close", "payload_added", "LIFTING", "lift"]
         observable = [event for event in self.events if event not in (
-            "GROUND_MANIPULATION_SCENE", "GROUND_GRIPPER_PRESHAPE", "GROUND_GRASP_GEOMETRY", "GROUND_PAYLOAD_MODELED")]
+            "GROUND_MANIPULATION_SCENE", "GROUND_GRIPPER_PRESHAPE", "GROUND_GRASP_GEOMETRY", "GROUND_PAYLOAD_MODELED",
+            "GROUND_GRASP_CALIBRATION")]
         self.assertEqual(expected, observable)
         self.assertTrue(self.scene.robot_state.attached_collision_objects)
+        calibration = [values for stage, values in self.statuses if stage == "GROUND_GRASP_CALIBRATION"]
+        self.assertEqual(1, len(calibration))
+        self.assertEqual(.020, calibration[0]["contact_overlap"])
+        self.assertAlmostEqual(.0156, calibration[0]["open_pad_edge"])
+        self.assertAlmostEqual(.0023094379126535995, calibration[0]["contact_pad_edge"])
 
     def test_cartesian_request_sets_payload_state_before_collision_aware_planning(self):
         self.update_target()
