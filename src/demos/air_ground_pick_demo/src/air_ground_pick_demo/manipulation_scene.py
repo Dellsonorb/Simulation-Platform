@@ -198,6 +198,12 @@ def attach_target_diff(current, measured_tcp_pose, tcp_link, robot_link_names,
     """
     if grasp_confirmed is not True:
         raise SceneError("real grasp confirmation required before planning attachment")
+    return _attachment_geometry_diff(current, measured_tcp_pose, tcp_link, robot_link_names, object_id)
+
+
+def _attachment_geometry_diff(current, measured_tcp_pose, tcp_link, robot_link_names,
+                              object_id=TARGET_ID):
+    """Geometry-only construction; real attachment uses the confirmation gate above."""
     target = _world_target(current, object_id)
     if measured_tcp_pose.header.frame_id != target.header.frame_id:
         raise SceneError("measured TCP and target frames must match")
