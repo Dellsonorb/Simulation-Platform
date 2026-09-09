@@ -95,7 +95,10 @@ def observe_from_camera_poses(owner, aerial_target, error_type):
         q = quaternion_from_matrix(tcp)
         pose.pose.orientation.x, pose.pose.orientation.y, pose.pose.orientation.z, pose.pose.orientation.w = q
         planning_pose = owner._transform_pose(pose, group.get_planning_frame())
-        group.set_start_state_to_current_state()
+        if getattr(owner, '_execution_clearance', False):
+            group.set_start_state(owner._check_full_robot_state('camera observation start'))
+        else:
+            group.set_start_state_to_current_state()
         group.set_pose_target(planning_pose, owner._end_effector_link)
         planned = group.plan()  # collision-aware observation plan; no grasp IK prerequisite
         success = bool(planned[0]) if isinstance(planned, tuple) else True
@@ -106,9 +109,12 @@ def observe_from_camera_poses(owner, aerial_target, error_type):
                               tcp_map=list(map(float, tcp[:3, 3])), aim_map=target)
         if not success or not trajectory.joint_trajectory.points:
             continue
-        if not group.execute(trajectory, wait=True):
-            raise error_type('camera observation trajectory execution failed')
-        group.stop()
+        if getattr(owner, '_execution_clearance', False):
+            owner._execute_checked_arm(trajectory, 'camera observation')
+        else:
+            if not group.execute(trajectory, wait=True):
+                raise error_type('camera observation trajectory execution failed')
+            group.stop()
         owner._verify_tcp_pose(planning_pose, 'camera observation')
         try:
             return owner._wait_for_ground_target(opening)

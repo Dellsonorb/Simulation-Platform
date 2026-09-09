@@ -121,7 +121,9 @@ class FullRobotManipulationTest(unittest.TestCase):
             self.validity_requests.append(copy.deepcopy(request))
             return GetStateValidityResponse(valid=self.valid)
 
-        def proxy(name, _type):
+        self.proxy_options = []
+        def proxy(name, _type, **options):
+            self.proxy_options.append((name, options))
             return {"/get_planning_scene": get_scene,
                     "/apply_planning_scene": apply_scene,
                     "/check_state_validity": validity}[name]
@@ -197,6 +199,17 @@ class FullRobotManipulationTest(unittest.TestCase):
         source = (PACKAGE / "scripts/run_air_ground_pick_demo.py").read_text()
         self.assertIn('rospy.get_param("~full_robot_manipulation", False)', source)
 
+    def test_only_serial_clearance_validity_transport_is_persistent(self):
+        for enabled in (False, True):
+            self.owner._get_scene = None
+            self.owner._execution_clearance = enabled
+            self.proxy_options.clear()
+            self.owner._get_manipulation_scene()
+            options = dict(self.proxy_options)
+            self.assertEqual(enabled, options['/check_state_validity'].get('persistent', False))
+            self.assertFalse(options['/get_planning_scene'].get('persistent', False))
+            self.assertFalse(options['/apply_planning_scene'].get('persistent', False))
+
     def test_scene_snapshot_uses_explicit_components_and_full_robot_links(self):
         self.update_target()
         required = (PlanningSceneComponents.SCENE_SETTINGS | PlanningSceneComponents.ROBOT_STATE |
@@ -269,7 +282,7 @@ class FullRobotManipulationTest(unittest.TestCase):
         self.owner._tf_buffer.lookup_transform.side_effect = shifted
         self.update_target()
         self.owner._tf_buffer.lookup_transform.assert_called_with(
-            "ground/base_link", "map", rospy.Time(0), rospy.Duration(.5))
+            "ground/base_link", "map", rospy.Time(0), rospy.Duration(0.0))
         box = self.scene.world.collision_objects[-1]
         self.assertEqual("ground/base_link", box.header.frame_id)
         self.assertAlmostEqual(1.6, box.primitive_poses[0].position.x)
@@ -278,8 +291,16 @@ class FullRobotManipulationTest(unittest.TestCase):
             result.header.stamp = rospy.Time.from_sec(1.)
             return result
         self.owner._tf_buffer.lookup_transform.side_effect = stale
-        with self.assertRaisesRegex(demo.DemoError, "stale"):
-            self.update_target()
+        before = copy.deepcopy(self.scene)
+        wall = [100.0]
+        def advance_wall(duration):
+            wall[0] += duration
+        with mock.patch.object(demo.time, "monotonic", side_effect=lambda: wall[0]), \
+                mock.patch.object(demo.rospy.rostime, "wallsleep", side_effect=advance_wall):
+            with self.assertRaisesRegex(demo.DemoError, "stale"):
+                self.update_target()
+        self.assertAlmostEqual(.5, wall[0] - 100.0)
+        self.assertEqual(before, self.scene)
 
     def test_preshape_uses_measured_start_and_original_tracking_tolerance(self):
         self.update_target()
