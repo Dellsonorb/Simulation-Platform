@@ -54,7 +54,7 @@ from air_ground_pick_demo.grasp import (
     generate_top_down_grasp,
     zero_terminal_motion,
 )
-from air_ground_pick_demo import manipulation_scene
+from air_ground_pick_demo import manipulation_scene, execution_clearance, execution_planning
 
 
 class DemoError(RuntimeError):
@@ -79,6 +79,15 @@ class AirGroundPickDemo:
         self._full_robot_manipulation = rospy.get_param("~full_robot_manipulation", False)
         if type(self._full_robot_manipulation) is not bool:
             raise DemoError("~full_robot_manipulation must be boolean")
+        self._execution_clearance = rospy.get_param("~execution_clearance", False)
+        if type(self._execution_clearance) is not bool:
+            raise DemoError("~execution_clearance must be boolean")
+        if self._execution_clearance and not self._full_robot_manipulation:
+            raise DemoError("~execution_clearance requires ~full_robot_manipulation")
+        self._execution_selected = None
+        self._execution_ik = None
+        self._execution_arm_in_flight = False
+        self._execution_arm_failed = False
         self._joint_state = None
         self._grasp_confirmed = False
         self._uav_state_received = None
@@ -852,9 +861,12 @@ class AirGroundPickDemo:
             trajectory = planned[1] if isinstance(planned, tuple) else planned
             if not success or not trajectory.joint_trajectory.points:
                 raise DemoError("collision-aware joint observation planning failed")
-            if not group.execute(trajectory, wait=True):
-                raise DemoError("collision-aware joint observation execution failed")
-            group.stop()
+            if getattr(self, "_execution_clearance", False):
+                self._execute_checked_arm(trajectory, "joint observation")
+            else:
+                if not group.execute(trajectory, wait=True):
+                    raise DemoError("collision-aware joint observation execution failed")
+                group.stop()
         else:
             self._execute_trajectory(
                 self._arm_client, self._observation_joint_names,
@@ -947,6 +959,9 @@ class AirGroundPickDemo:
             (accepted.pose.orientation.x, accepted.pose.orientation.y,
              accepted.pose.orientation.z, accepted.pose.orientation.w) = self._quaternion_from_yaw(aerial_target[3])
             self._update_manipulation_target(accepted, source="accepted_aerial")
+            if getattr(self, "_execution_clearance", False):
+                execution_planning.install_guard(self)
+                self._check_full_robot_state("guarded observation start")
         if self._placement_mode == "rm4d":
             return self._observe_ground_target_rm4d(aerial_target)
         return self._observe_ground_target_standoff(aerial_target)
@@ -1123,6 +1138,11 @@ class AirGroundPickDemo:
         start = state.joint_state.position[index]
         conservative_jaw_opening(start, self._maximum_gripper_opening, self._maximum_gripper_joint)
         conservative_jaw_opening(final_joint, self._maximum_gripper_opening, self._maximum_gripper_joint)
+        if getattr(self, "_execution_clearance", False) and label == "AG95 physical closure":
+            samples = execution_clearance.closure_positions(start, final_joint, self._cartesian_eef_step)
+            return execution_planning.check_samples(self, (
+                execution_clearance.state_at_positions(state, ["left_outer_knuckle_joint"], [q])
+                for q in samples), label)
         # Two 55-mm linkage lengths give a conservative 110-mm sweep radius.
         # Bound sample displacement using the existing Cartesian spatial step;
         # these are discrete full-model checks, not a continuous-motion proof.
@@ -1268,6 +1288,26 @@ class AirGroundPickDemo:
         return self._cartesian_path(request)
 
     def _execute_pregrasp(self, target, continuation=None):
+        if getattr(self, "_execution_clearance", False):
+            selected = getattr(self, "_execution_selected", None)
+            if selected is not None:
+                if selected["pregrasp"] != target:
+                    raise DemoError("prevalidated pregrasp target changed")
+                self._execute_checked_arm(selected["approach"], "pregrasp")
+                return self._verify_tcp_pose(target, "pregrasp")
+            # Legacy camera observation can still request a pregrasp pose.
+            # Its actual start and full retimed transit use the same guard.
+            group = self._move_group
+            group.set_start_state(self._check_full_robot_state("observation pregrasp start"))
+            group.set_pose_target(target, self._end_effector_link)
+            planned = group.plan()
+            group.clear_pose_targets()
+            success = bool(planned[0]) if isinstance(planned, tuple) else True
+            trajectory = planned[1] if isinstance(planned, tuple) else planned
+            if not success or not trajectory.joint_trajectory.points:
+                raise DemoError("guarded observation pregrasp planning failed")
+            self._execute_checked_arm(trajectory, "observation pregrasp")
+            return self._verify_tcp_pose(target, "pregrasp")
         group = self._move_group
         attempts = self._rm4d_pregrasp_plan_attempts \
             if continuation is not None else 1
@@ -1310,6 +1350,16 @@ class AirGroundPickDemo:
 
     def _execute_cartesian(self, target, label):
         group = self._move_group
+        if getattr(self, "_execution_clearance", False):
+            # Replan from fresh measured joints and the real attachment after
+            # contact; the planning-only search result cannot replace either.
+            start = self._check_full_robot_state(label + " start", require_payload=label == "lift")
+            positions = dict(zip(start.joint_state.name, start.joint_state.position))
+            if label == "lift" and positions["left_outer_knuckle_joint"] > execution_clearance.OBSERVED_LOADED_JOINT_MAX:
+                raise DemoError("measured AG95 closure exceeds the checked loaded range")
+            trajectory = execution_planning.cartesian(self, start, target, label)
+            self._execute_checked_arm(trajectory, label)
+            return self._verify_tcp_pose(target, label)
         if getattr(self, "_full_robot_manipulation", False):
             start = self._check_full_robot_state(label + " start", require_payload=label == "lift")
             group.set_start_state(start)
@@ -1384,6 +1434,9 @@ class AirGroundPickDemo:
             if positions.get("left_outer_knuckle_joint", -math.inf) < \
                     self._minimum_gripper_closed_joint:
                 raise DemoError("AG95 did not close around the target")
+            if (getattr(self, "_execution_clearance", False) and
+                    positions["left_outer_knuckle_joint"] > execution_clearance.OBSERVED_LOADED_JOINT_MAX):
+                raise DemoError("measured AG95 closure exceeds the checked loaded range")
             if full:
                 self._attach_manipulation_target()
         except Exception as error:
@@ -1416,16 +1469,51 @@ class AirGroundPickDemo:
             self._contact_overlap, self._surface_clearance)
 
     def _pick_and_lift(self, sensor_pose, target):
+        if getattr(self, "_execution_clearance", False):
+            try:
+                return self._pick_and_lift_guarded(sensor_pose, target)
+            finally:
+                self._execution_selected = None
+        return self._pick_and_lift_sequence(sensor_pose, target)
+
+    def _preview_ground_candidate(self, target_map, candidate, rm_seed):
+        return execution_planning.preview(self, target_map, candidate, rm_seed)
+
+    def _execute_checked_arm(self, trajectory, label):
+        try:
+            return execution_planning.execute_checked(self, trajectory, label)
+        except RuntimeError as error:
+            raise DemoError(str(error)) from error
+
+    def _pick_and_lift_guarded(self, sensor_pose, target):
+        self._initialize_moveit()
+        resolved = {offset: execution_planning.poses(self, target, self._map_frame, sensor_pose.header.stamp, offset)
+                    for offset in (0., math.pi)}
+        self._update_manipulation_target(sensor_pose, source="accepted_refined")
+        execution_planning.install_guard(self)
+        self._check_full_robot_state("guarded refined start")
+        self._preshape_gripper()
+        _state, held = execution_planning.stationary_hold(self, execution_planning.ARM_NAMES)
+        result = execution_planning.search(self, target, self._map_frame, sensor_pose.header.stamp,
+            getattr(self, "_execution_rm_seed", None), actual=True, held_desired=held, resolved_poses=resolved)
+        self._publish_status("GROUND_MANIPULATION_PLAN", stage="whole_chain", feasible=result["feasible"],
+            reason=result["reason"], attempts=result["attempts"], grasp_yaw_offset=result["grasp_yaw_offset"])
+        if not result["feasible"]:
+            raise DemoError("whole manipulation search rejected all six branches")
+        self._execution_selected = result["selection"]
+        return self._pick_and_lift_sequence(sensor_pose, target)
+
+    def _pick_and_lift_sequence(self, sensor_pose, target):
         generated = self._generate_ground_grasp(target)
         group = self._initialize_moveit()
         planning_frame = group.get_planning_frame()
-        messages = tuple(
-            self._transform_pose(
-                self._pose_message(
-                    pose, self._map_frame, sensor_pose.header.stamp),
-                planning_frame)
-            for pose in (generated.pregrasp, generated.grasp, generated.lift))
-        pregrasp, grasp, lift = messages
+        if getattr(self, "_execution_clearance", False):
+            pregrasp, grasp, lift = [self._execution_selected[name] for name in ("pregrasp", "grasp", "lift")]
+        else:
+            pregrasp, grasp, lift = tuple(
+                self._transform_pose(
+                    self._pose_message(pose, self._map_frame, sensor_pose.header.stamp), planning_frame)
+                for pose in (generated.pregrasp, generated.grasp, generated.lift))
         if getattr(self, "_full_robot_manipulation", False):
             geometry = manipulation_scene.ag95_contact_geometry(
                 self._target_size, self._maximum_gripper_opening,
@@ -1435,8 +1523,9 @@ class AirGroundPickDemo:
                 open_pad_edge=self._finger_pad_lower_edge_offset, contact_pad_edge=geometry.pad_edge,
                 pad_down_shift=geometry.delta, contact_overlap=self._contact_overlap,
                 grasp_tcp_map_z=generated.grasp.position[2])
-            self._update_manipulation_target(sensor_pose, source="accepted_refined")
-            self._preshape_gripper()
+            if not getattr(self, "_execution_clearance", False):
+                self._update_manipulation_target(sensor_pose, source="accepted_refined")
+                self._preshape_gripper()
         self._publish_status("PREGRASP")
         self._execute_pregrasp(pregrasp)
         self._publish_status("GRASP")
