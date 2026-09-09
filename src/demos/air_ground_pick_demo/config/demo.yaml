@@ -30,6 +30,7 @@ observation_max_age: 1.0
 
 ground_standoff: 0.82
 ground_goal_tolerance: 0.06
+ground_yaw_goal_tolerance: 0.08
 ground_tf_max_age: 0.50
 navigation_timeout: 60.0
 max_ground_travel: 1.10
@@ -47,6 +48,7 @@ observation_joint_tolerance: 0.08
 arm_action_timeout: 25.0
 ground_observation_timeout: 20.0
 ground_observation_max_age: 1.0
+ground_observation_mode: camera_centered_v1
 
 move_group: manipulator
 end_effector_link: ground/gripper_tcp_link

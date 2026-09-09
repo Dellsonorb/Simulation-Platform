@@ -45,17 +45,18 @@ def _finite(value, label):
 
 
 def _event(events, state):
-    return events[EXPECTED_STATES.index(state)]
+    return next(event for event in events if event.get('state') == state)
 
 
 def status_sequence_summary(
-        events, maximum_ground_travel, minimum_tcp_lift):
+        events, maximum_ground_travel, minimum_tcp_lift, ground_only=False):
     """Validate the one-shot demo states and their physical bounds."""
     states = [event.get("state") for event in events]
-    if states != list(EXPECTED_STATES):
+    expected = EXPECTED_STATES[8:] if ground_only else EXPECTED_STATES
+    if states != list(expected):
         raise DemoCheckError(
             "status sequence is %s, expected %s" %
-            (states, list(EXPECTED_STATES)))
+            (states, list(expected)))
     status_times = [
         _finite(event.get("ros_time"), "%s ros_time" % event["state"])
         for event in events
@@ -191,7 +192,8 @@ def finalized_summary(payload):
 
 
 class DemoMonitor:
-    def __init__(self, rospy, goal_succeeded, target_model):
+    def __init__(self, rospy, goal_succeeded, target_model, ground_only=False):
+        self._expected_states = EXPECTED_STATES[8:] if ground_only else EXPECTED_STATES
         self._rospy = rospy
         self._goal_succeeded = goal_succeeded
         self._target_model = target_model
@@ -218,12 +220,12 @@ class DemoMonitor:
                 raise DemoCheckError(
                     "demo reported FAILED: %s" % payload.get("reason", ""))
             with self._lock:
-                if state in EXPECTED_STATES:
+                if state in self._expected_states:
                     if self.events and self.events[-1].get("state") == state:
                         return
                     expected_index = len(self.events)
-                    if (expected_index >= len(EXPECTED_STATES) or
-                            state != EXPECTED_STATES[expected_index]):
+                    if (expected_index >= len(self._expected_states) or
+                            state != self._expected_states[expected_index]):
                         raise DemoCheckError(
                             "unexpected status %s after %s" %
                             (state, [item.get("state")
@@ -325,7 +327,7 @@ def run(args):
 
     rospy.init_node("check_air_ground_pick_demo", anonymous=True)
     monitor = DemoMonitor(
-        rospy, GoalStatus.SUCCEEDED, args.target_model)
+        rospy, GoalStatus.SUCCEEDED, args.target_model, ground_only=args.ground_only)
     subscriptions = (
         rospy.Subscriber(args.status_topic, String, monitor.status,
                          queue_size=50),
@@ -361,18 +363,20 @@ def run(args):
 
     events = captured["events"]
     sequence = status_sequence_summary(
-        events, args.maximum_ground_travel, args.minimum_lift)
-    air_event = _event(events, "AIR_HANDOFF")
+        events, args.maximum_ground_travel, args.minimum_lift, ground_only=args.ground_only)
     ground_event = _event(events, "GROUND_REFINED")
-    aerial = observation_summary(
-        captured["air_observations"], air_event["ros_time"],
-        air_event.get("observation_stamp"), args.map_frame,
-        args.maximum_observation_age)
+    aerial = flight = None
+    if not args.ground_only:
+        air_event = _event(events, "AIR_HANDOFF")
+        aerial = observation_summary(
+            captured["air_observations"], air_event["ros_time"],
+            air_event.get("observation_stamp"), args.map_frame,
+            args.maximum_observation_age)
+        flight = flight_cycle_summary(captured["armed_samples"])
     ground = observation_summary(
         captured["ground_observations"], ground_event["ros_time"],
         ground_event.get("observation_stamp"), args.map_frame,
         args.maximum_observation_age)
-    flight = flight_cycle_summary(captured["armed_samples"])
     controllers = controller_success_summary(
         captured["arm_successes"], ground_event["ros_time"],
         args.minimum_arm_successes)
@@ -382,6 +386,7 @@ def run(args):
         args.minimum_lift)
     return {
         "status": "CHECKS_PASS",
+        "kind": "GROUND_SEGMENT_CHECK" if args.ground_only else "AIR_GROUND_E2E_CHECK",
         "sequence": sequence,
         "observations": {"aerial": aerial, "ground": ground},
         "flight": flight,
@@ -398,6 +403,8 @@ def parse_args(argv=None):
     output.add_argument("--summary")
     output.add_argument("--finalize-summary")
     parser.add_argument("--timeout", type=float, default=300.0)
+    parser.add_argument('--ground-only', action='store_true',
+                        help='Check real Ground stages only, conditioned on an archived aerial handoff')
     parser.add_argument(
         "--status-topic", default="/air_ground_pick_demo/status")
     parser.add_argument("--air-pose-topic", default="/air_observer/target_pose")

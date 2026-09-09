@@ -180,8 +180,15 @@ def yaw_error_mod_pi(first, second):
 
 
 def estimate_target_pose(
-        points, target_height, top_surface_tolerance=0.012):
-    """Estimate cuboid center xyz and undirected long-axis yaw."""
+        points, target_height, top_surface_tolerance=0.012,
+        target_top_size=None, minimum_top_span_fraction=0.90,
+        maximum_top_tilt_degrees=15.0):
+    """Estimate center/yaw; optional known top dimensions require map +Z up.
+
+    Ground's opt-in gate requires a measured horizontal surface and both top
+    spans within the declared size envelope. Aerial callers retain the legacy
+    estimator when target_top_size is None. No nominal center height is used.
+    """
     cloud = np.asarray(points, dtype=np.float64)
     height = float(target_height)
     tolerance = float(top_surface_tolerance)
@@ -196,6 +203,24 @@ def estimate_target_pose(
     top = cloud[cloud[:, 2] >= top_level - tolerance]
     if len(top) < 3:
         raise PerceptionError("too few target top-surface points")
+    if target_top_size is not None:
+        dimensions = np.asarray(target_top_size, dtype=np.float64)
+        fraction = float(minimum_top_span_fraction)
+        tilt = float(maximum_top_tilt_degrees)
+        if (dimensions.shape != (2,) or not np.isfinite(dimensions).all() or
+                dimensions[0] <= dimensions[1] or dimensions[1] <= 0.0 or
+                not math.isfinite(fraction) or not 0.0 < fraction <= 1.0 or
+                not math.isfinite(tilt) or not 0.0 <= tilt < 90.0):
+            raise PerceptionError("target top validity parameters are invalid")
+        try:
+            _, singular_values, axes = np.linalg.svd(
+                top - np.mean(top, axis=0), full_matrices=False)
+        except np.linalg.LinAlgError as error:
+            raise PerceptionError("target top surface fit failed") from error
+        if singular_values[1] <= 1e-10:
+            raise PerceptionError("target top surface is degenerate")
+        if abs(float(axes[-1, 2])) < math.cos(math.radians(tilt)):
+            raise PerceptionError("target top surface is not gravity-horizontal")
     mean_xy = np.mean(top[:, :2], axis=0)
     centered = top[:, :2] - mean_xy
     covariance = centered.T.dot(centered) / float(len(centered))
@@ -206,6 +231,17 @@ def estimate_target_pose(
     short_axis = np.array((-long_axis[1], long_axis[0]))
     long_projection = centered.dot(long_axis)
     short_projection = centered.dot(short_axis)
+    if target_top_size is not None:
+        spans = np.array((np.ptp(long_projection), np.ptp(short_projection)))
+        # At 90% coverage, one-sided missing support contributes at most
+        # 12 mm / 2.65 mm center uncertainty for the declared .240 x .053 top.
+        # The matching +10% bound rejects surfaces larger than that envelope.
+        epsilon = 1e-12
+        if (np.any(spans + epsilon < fraction * dimensions) or
+                np.any(spans - epsilon > (2.0 - fraction) * dimensions)):
+            raise PerceptionError(
+                "target top measured spans are incomplete or inconsistent: "
+                "%.6f x %.6f" % tuple(spans))
     center_xy = (
         mean_xy +
         0.5 * (long_projection.min() + long_projection.max()) * long_axis +

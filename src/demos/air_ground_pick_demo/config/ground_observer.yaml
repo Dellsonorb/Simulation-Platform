@@ -8,6 +8,13 @@ output_topic: /ground_observer/target_pose
 status_topic: /ground_observer/status
 target_height: 0.115
 top_surface_tolerance: 0.015
+# Opt-in Ground geometry: 90% span limits missing-support center uncertainty
+# to 12 mm along / 2.65 mm across the known top, below the 20 mm TCP tolerance.
+target_top_size: [0.240, 0.053]
+minimum_top_span_fraction: 0.90
+maximum_top_tilt_degrees: 15.0
+# Raw measured surface median for camera aiming; not an accepted cuboid pose.
+surface_cue_topic: /ground_observer/surface_cue
 min_depth: 0.12
 max_depth: 2.5
 min_pixels: 40

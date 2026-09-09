@@ -107,6 +107,14 @@ def motion_required(current_xy, goal_xy, tolerance):
     return travel_distance(current_xy, goal_xy) > tolerance
 
 
+def arrival_within_tolerance(actual, goal, xy_tolerance, yaw_tolerance):
+    actual, goal = _finite_pose(actual, 'actual'), _finite_pose(goal, 'goal')
+    xy_limit = _positive(xy_tolerance, 'xy_tolerance')
+    yaw_limit = _positive(yaw_tolerance, 'yaw_tolerance')
+    yaw_error = abs(math.atan2(math.sin(actual[2]-goal[2]), math.cos(actual[2]-goal[2])))
+    return travel_distance(actual[:2], goal[:2]) <= xy_limit and yaw_error <= yaw_limit
+
+
 def travel_distance(initial_xy, current_xy):
     initial_x, initial_y = _finite_pair(initial_xy, "initial_xy")
     current_x, current_y = _finite_pair(current_xy, "current_xy")

@@ -19,6 +19,13 @@ def load_module():
 
 
 class ApproachTest(unittest.TestCase):
+    def test_latched_position_history_does_not_replace_actual_arrival(self):
+        approach = load_module()
+        self.assertTrue(approach.arrival_within_tolerance((.04, 0, -.01), (0, 0, 0), .06, .08))
+        self.assertFalse(approach.arrival_within_tolerance((.0986, 0, .07), (0, 0, 0), .06, .08))
+        self.assertFalse(approach.arrival_within_tolerance((0, 0, .09), (0, 0, 0), .06, .08))
+        self.assertTrue(approach.arrival_within_tolerance((0, 0, math.pi), (0, 0, -math.pi), .06, .08))
+
     def test_goal_stays_on_current_base_side_and_faces_target(self):
         approach = load_module()
         goal = approach.compute_standoff_goal(

@@ -13,7 +13,7 @@ from control_msgs.msg import (
     FollowJointTrajectoryAction,
     FollowJointTrajectoryGoal,
 )
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PointStamped, PoseStamped
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 import moveit_commander
 from moveit_msgs.msg import RobotState
@@ -29,6 +29,7 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 
 from air_ground_pick_demo.approach import (
     ApproachError,
+    arrival_within_tolerance,
     compute_heading_goal,
     compute_staged_candidate_goals,
     compute_staged_standoff_goals,
@@ -66,6 +67,8 @@ class AirGroundPickDemo:
         self._uav_state = None
         self._air_pose = None
         self._ground_target_pose = None
+        self._ground_surface_cue = None
+        self._ground_observation_mode = rospy.get_param('~ground_observation_mode', 'legacy_pregrasp')
         self._joint_state = None
         self._grasp_confirmed = False
         self._uav_state_received = None
@@ -123,6 +126,7 @@ class AirGroundPickDemo:
         self._ground_standoff = self._positive("ground_standoff")
         self._ground_goal_tolerance = self._nonnegative(
             "ground_goal_tolerance")
+        self._ground_yaw_goal_tolerance = self._positive('ground_yaw_goal_tolerance')
         self._ground_tf_max_age = self._positive("ground_tf_max_age")
         self._navigation_timeout = self._positive("navigation_timeout")
         self._max_ground_travel = self._positive("max_ground_travel")
@@ -247,6 +251,8 @@ class AirGroundPickDemo:
         rospy.Subscriber(
             self._ground_pose_topic, PoseStamped,
             self._ground_target_pose_callback, queue_size=10)
+        rospy.Subscriber('/ground_observer/surface_cue', PointStamped,
+                         self._ground_surface_cue_callback, queue_size=1)
         rospy.Subscriber(
             self._joint_state_topic, JointState, self._joint_state_callback,
             queue_size=10)
@@ -341,6 +347,10 @@ class AirGroundPickDemo:
         with self._lock:
             self._ground_target_pose = message
             self._ground_pose_received = time.monotonic()
+
+    def _ground_surface_cue_callback(self, message):
+        with self._lock:
+            self._ground_surface_cue = message
 
     def _joint_state_callback(self, message):
         with self._lock:
@@ -604,12 +614,18 @@ class AirGroundPickDemo:
         self._execute_ground_goal(final_goal, "RM4D top-1 navigation")
         self._stop_ground(required=True)
         final = self._ground_pose()
+        self._publish_status('GROUND_ARRIVAL_MEASURED', actual_pose_map=list(final),
+                             goal_pose_map=list(final_goal))
+        if not arrival_within_tolerance(final, final_goal, self._ground_goal_tolerance,
+                                        self._ground_yaw_goal_tolerance):
+            raise DemoError('Ground actual arrival is outside candidate position/yaw tolerance')
         total_travel = travel_distance(start[:2], final[:2])
         if total_travel > self._max_ground_travel:
             raise DemoError("ground travel bound exceeded")
         target_distance = travel_distance(final[:2], target_map[:2])
         self._publish_status(
             "GROUND_STOPPED", ground_travel=total_travel,
+            actual_pose_map=list(final),
             target_distance=target_distance,
             navigation_goal_map=[
                 final_goal.x, final_goal.y, final_goal.yaw],
@@ -803,9 +819,9 @@ class AirGroundPickDemo:
                 (target[2], expected_center_z,
                  self._target_center_height_tolerance))
 
-    def _wait_for_ground_target(self, opening):
+    def _wait_for_ground_target(self, opening, timeout=None):
         started = time.monotonic()
-        deadline = started + self._ground_observation_timeout
+        deadline = started + (self._ground_observation_timeout if timeout is None else timeout)
         while not rospy.is_shutdown() and time.monotonic() < deadline:
             pose, received = self._manipulation_snapshot()[:2]
             if (pose is not None and received is not None and
@@ -825,6 +841,9 @@ class AirGroundPickDemo:
         raise DemoError("near-field D435 observation timed out")
 
     def _observe_ground_target_rm4d(self, aerial_target):
+        if self._ground_observation_mode == 'camera_centered_v1':
+            from air_ground_pick_demo.ground_observation import observe_from_camera_poses
+            return observe_from_camera_poses(self, aerial_target, DemoError)
         self._publish_status("GROUND_OBSERVE")
         opening = self._open_gripper()
         generated = generate_top_down_grasp(

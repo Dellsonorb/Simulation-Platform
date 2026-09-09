@@ -607,7 +607,7 @@ class GroundManipulatorPlatformTest(unittest.TestCase):
         base = root.find("./link[@name='ground/base_link']")
         collisions = base.findall("collision")
         self.assertEqual(1, len(collisions))
-        self.assertEqual("base_link_collision", collisions[0].get("name"))
+        self.assertEqual("ground/base_link_collision", collisions[0].get("name"))
         self.assertEqual(
             renderer.BASE_COLLISION_SIZE,
             collisions[0].find("geometry/box").get("size"))

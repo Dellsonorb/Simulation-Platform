@@ -7,7 +7,7 @@ import math
 import threading
 
 from cv_bridge import CvBridge, CvBridgeError
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PointStamped, PoseStamped
 import message_filters
 import numpy as np
 import rospy
@@ -50,6 +50,15 @@ class RedTargetObserver:
         self.target_height = float(rospy.get_param("~target_height", 0.115))
         self.top_surface_tolerance = float(rospy.get_param(
             "~top_surface_tolerance", 0.015))
+        self.target_top_size = rospy.get_param("~target_top_size", None)
+        self.minimum_top_span_fraction = float(rospy.get_param(
+            "~minimum_top_span_fraction", 0.90))
+        self.maximum_top_tilt_degrees = float(rospy.get_param(
+            "~maximum_top_tilt_degrees", 15.0))
+        surface_cue_topic = rospy.get_param("~surface_cue_topic", "")
+        if ((self.target_top_size is not None or surface_cue_topic) and
+                self.target_frame != "map"):
+            raise ValueError("Ground top validation and surface cue require map frame")
         self.min_depth = float(rospy.get_param("~min_depth", 0.15))
         self.max_depth = float(rospy.get_param("~max_depth", 4.0))
         self.min_pixels = int(rospy.get_param("~min_pixels", 40))
@@ -73,6 +82,9 @@ class RedTargetObserver:
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
         self.pose_publisher = rospy.Publisher(
             self.output_topic, PoseStamped, queue_size=1)
+        self.surface_cue_publisher = (
+            rospy.Publisher(surface_cue_topic, PointStamped, queue_size=1)
+            if surface_cue_topic else None)
         self.status_publisher = rospy.Publisher(
             self.status_topic, String, queue_size=1, latch=True)
 
@@ -177,6 +189,29 @@ class RedTargetObserver:
             if not rospy.is_shutdown():
                 raise
 
+    def publish_surface_cue(self, points, stamp):
+        """Publish measured surface support for aiming, never a cuboid pose."""
+        if self.surface_cue_publisher is None or rospy.is_shutdown():
+            return
+        if self.target_frame != "map":
+            raise PerceptionError("surface cue requires map frame")
+        cloud = np.asarray(points, dtype=np.float64)
+        if cloud.ndim != 2 or cloud.shape[1:] != (3,):
+            raise PerceptionError("surface cue points are invalid")
+        cloud = cloud[np.isfinite(cloud).all(axis=1)]
+        if not len(cloud):
+            raise PerceptionError("surface cue has no finite measured points")
+        cue = PointStamped()
+        cue.header.frame_id = self.target_frame
+        cue.header.stamp = stamp
+        cue.point.x, cue.point.y, cue.point.z = (
+            float(value) for value in np.median(cloud, axis=0))
+        try:
+            self.surface_cue_publisher.publish(cue)
+        except rospy.ROSException:
+            if not rospy.is_shutdown():
+                raise
+
     def observe(self, color, depth, color_info, depth_info):
         try:
             color_frame, depth_frame, stamps = self.validate_stream_metadata(
@@ -210,9 +245,21 @@ class RedTargetObserver:
                 target_from_color)
             target_points = color_points.dot(
                 target_rotation.T) + target_translation
+            if self.surface_cue_publisher is not None:
+                validate_observation_stamps(
+                    stamps, rospy.Time.now().to_sec(), self.max_observation_age,
+                    self.max_future_skew)
+                self.publish_surface_cue(target_points, color.header.stamp)
+            if self.target_top_size is not None and (
+                    np.any(mask[0, :]) or np.any(mask[-1, :]) or
+                    np.any(mask[:, 0]) or np.any(mask[:, -1])):
+                raise PerceptionError("target top observation is image-clipped")
             estimate = estimate_target_pose(
                 target_points, self.target_height,
-                self.top_surface_tolerance)
+                self.top_surface_tolerance,
+                target_top_size=self.target_top_size,
+                minimum_top_span_fraction=self.minimum_top_span_fraction,
+                maximum_top_tilt_degrees=self.maximum_top_tilt_degrees)
             with self.samples_lock:
                 self.samples.append(estimate)
                 if len(self.samples) < self.stable_frames:

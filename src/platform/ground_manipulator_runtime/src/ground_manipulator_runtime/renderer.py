@@ -12,6 +12,8 @@ LOCAL_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,127}$")
 INVALID_NAME_RUN_RE = re.compile(r"[^A-Za-z0-9_]+")
 BASE_COLLISION_ORIGIN = "0.018058912 0.001357451 -0.160420741"
 BASE_COLLISION_SIZE = "1.026335219 0.782744936 0.395154782"
+# SDFormat matches link-level surface settings using the collision's link prefix.
+BASE_COLLISION_NAME = FRAME_PREFIX + "base_link_collision"
 INCOMPATIBLE_FIXED_JOINT_TAGS = (
     "axis", "limit", "dynamics", "calibration", "mimic",
     "safety_controller",
@@ -81,10 +83,10 @@ def _replace_bunker_collisions(links, link_sources):
     base_link = next(
         link for link in links if link_sources[link] == "base_link")
     base_link.append(ET.fromstring(
-        '<collision name="base_link_collision">'
+        '<collision name="%s">'
         '<origin xyz="%s" rpy="0 0 0"/>'
         '<geometry><box size="%s"/></geometry>'
-        '</collision>' % (BASE_COLLISION_ORIGIN, BASE_COLLISION_SIZE)))
+        '</collision>' % (BASE_COLLISION_NAME, BASE_COLLISION_ORIGIN, BASE_COLLISION_SIZE)))
 
 
 def transform_robot_tree(root):
@@ -242,7 +244,7 @@ def validate_runtime_tree(root):
     if len(base_collisions) != 1:
         raise RenderError("runtime base collision differs")
     base_collision = base_collisions[0]
-    if (base_collision.get("name") != "base_link_collision" or
+    if (base_collision.get("name") != BASE_COLLISION_NAME or
             base_collision.find("origin") is None or
             base_collision.find("origin").get("xyz") != BASE_COLLISION_ORIGIN or
             base_collision.find("geometry/box") is None or
