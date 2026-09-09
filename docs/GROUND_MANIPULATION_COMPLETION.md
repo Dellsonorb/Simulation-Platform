@@ -133,6 +133,36 @@ contact first; this correction is not a bilateral-contact or payload-lift
 certificate. No knuckle collision allowance, observation/force threshold,
 tracking limit, target dimension, or real grasp criterion is relaxed.
 
+## Final bounded online disposition
+
+AGENT's batch ends at8/8 Gazebo starts, with no formal run or retry after the
+cap. On the other archived Moderate station (candidate000009), code c12d8ba
+passes the complete arrival-conditioned Ground chain with this correction:
+real D435 refine, first-branch pregrasp and descend, sampled whole-robot closure,
+fresh confirmed physical grip, modeled payload/current-state validity and
+collision-aware lift. TCP rises149.537mm and physical target148.902mm; existing
+0.581s retention stays confirmed, relative target-hand movement≤0.04043mm.
+The gripper action contact-stalls at the original path limit and is accepted
+by the existing real-confirmation gate, not ordinary action success.
+
+Public six-arm feedback again exactly matches same-stamp preceding1ms pose
+increments, independently checked wrist quaternion-rate error≤1.02e-7rad/s
+during lift. Raw native discrepancy remains. Together with Easy05 this supports
+the feedback convention in two specific executions, not general reliability.
+
+The nominal clearance at the separate Moderate source624 remains too small
+for the recorded actual TCP tracking error: measured finger/chassis collision
+properly blocks descent. No tiny-collision exemption or tracking relaxation
+was added. The sole aerial E2E07 is still a failure, before the contact-height
+correction; the corrected full aerial chain has **not** been re-run. Candidate
+clearance/actual execution robustness remains development work.
+
+Final relevant checks:109 SIM tests and133 native AGENT tests pass without
+skips;645 core tests pass with22 environment skips (overlapping suites).
+Native Pluginlib construction, actual mesh calibration, and native MoveIt
+scene application are included. Builds/install pass. Keep the correction
+feature branch and PR Draft; historical defaults/results remain available.
+
 Final bounded online results and limits are recorded in the AGENT repository's
 `docs/GROUND_MANIPULATION_BATCH_RESULTS.md`; raw/derived development data live
 under `outputs/development/ground-manipulation-batch/`. No formal run is included.
