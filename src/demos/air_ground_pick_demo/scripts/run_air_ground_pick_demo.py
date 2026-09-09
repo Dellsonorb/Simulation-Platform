@@ -1036,7 +1036,12 @@ class AirGroundPickDemo:
                     rospy.wait_for_service(name, timeout=self._moveit_server_timeout)
                 self._get_scene = rospy.ServiceProxy("/get_planning_scene", GetPlanningScene)
                 self._apply_scene = rospy.ServiceProxy("/apply_planning_scene", ApplyPlanningScene)
-                self._state_validity = rospy.ServiceProxy("/check_state_validity", GetStateValidity)
+                # Clearance sampling is serialized and makes thousands of
+                # identical-service calls. Reuse only this read-only transport;
+                # a dropped connection still propagates, without retry/PASS.
+                self._state_validity = rospy.ServiceProxy(
+                    "/check_state_validity", GetStateValidity,
+                    persistent=getattr(self, "_execution_clearance", False))
             except (rospy.ROSException, rospy.ServiceException) as error:
                 raise DemoError("full manipulation scene services unavailable: %s" % error) from error
         request = GetPlanningSceneRequest()

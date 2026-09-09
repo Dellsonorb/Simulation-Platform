@@ -121,7 +121,9 @@ class FullRobotManipulationTest(unittest.TestCase):
             self.validity_requests.append(copy.deepcopy(request))
             return GetStateValidityResponse(valid=self.valid)
 
-        def proxy(name, _type):
+        self.proxy_options = []
+        def proxy(name, _type, **options):
+            self.proxy_options.append((name, options))
             return {"/get_planning_scene": get_scene,
                     "/apply_planning_scene": apply_scene,
                     "/check_state_validity": validity}[name]
@@ -196,6 +198,17 @@ class FullRobotManipulationTest(unittest.TestCase):
         self.assertIs(False, config.get("full_robot_manipulation"))
         source = (PACKAGE / "scripts/run_air_ground_pick_demo.py").read_text()
         self.assertIn('rospy.get_param("~full_robot_manipulation", False)', source)
+
+    def test_only_serial_clearance_validity_transport_is_persistent(self):
+        for enabled in (False, True):
+            self.owner._get_scene = None
+            self.owner._execution_clearance = enabled
+            self.proxy_options.clear()
+            self.owner._get_manipulation_scene()
+            options = dict(self.proxy_options)
+            self.assertEqual(enabled, options['/check_state_validity'].get('persistent', False))
+            self.assertFalse(options['/get_planning_scene'].get('persistent', False))
+            self.assertFalse(options['/apply_planning_scene'].get('persistent', False))
 
     def test_scene_snapshot_uses_explicit_components_and_full_robot_links(self):
         self.update_target()
