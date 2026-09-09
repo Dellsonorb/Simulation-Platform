@@ -1051,11 +1051,32 @@ class AirGroundPickDemo:
         if accepted_pose.header.frame_id == planning_frame:
             planning_pose = copy.deepcopy(accepted_pose)
         else:
-            transform = self._tf_buffer.lookup_transform(
-                planning_frame, accepted_pose.header.frame_id, rospy.Time(0), rospy.Duration(.5))
-            if not transform_is_fresh(transform.header.stamp.to_sec(), rospy.Time.now().to_sec(),
-                                      self._ground_tf_max_age):
-                raise DemoError("target planning-frame transform is stale")
+            # MoveIt startup can delay Python TF callbacks. A latest lookup's
+            # timeout checks availability only, so explicitly wait for freshness
+            # within the existing lookup budget, even when simulated time stops.
+            deadline = time.monotonic() + .5
+            reason = 'unavailable'
+            while not rospy.is_shutdown():
+                if time.monotonic() >= deadline:
+                    raise DemoError("target planning-frame transform is %s" % reason)
+                try:
+                    transform = self._tf_buffer.lookup_transform(
+                        planning_frame, accepted_pose.header.frame_id,
+                        rospy.Time(0), rospy.Duration(0.0))
+                    if time.monotonic() < deadline and transform_is_fresh(
+                            transform.header.stamp.to_sec(), rospy.Time.now().to_sec(),
+                            self._ground_tf_max_age):
+                        break
+                    reason = "stale"
+                except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
+                        tf2_ros.ExtrapolationException) as error:
+                    reason = "unavailable: %s" % error
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    raise DemoError("target planning-frame transform is %s" % reason)
+                rospy.rostime.wallsleep(min(.05, remaining))
+            else:
+                raise DemoError("ROS shutdown while waiting for target planning-frame transform")
             planning_pose = do_transform_pose(accepted_pose, transform)
         scene = self._get_manipulation_scene()
         try:

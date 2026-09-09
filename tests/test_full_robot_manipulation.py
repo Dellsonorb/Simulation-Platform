@@ -269,7 +269,7 @@ class FullRobotManipulationTest(unittest.TestCase):
         self.owner._tf_buffer.lookup_transform.side_effect = shifted
         self.update_target()
         self.owner._tf_buffer.lookup_transform.assert_called_with(
-            "ground/base_link", "map", rospy.Time(0), rospy.Duration(.5))
+            "ground/base_link", "map", rospy.Time(0), rospy.Duration(0.0))
         box = self.scene.world.collision_objects[-1]
         self.assertEqual("ground/base_link", box.header.frame_id)
         self.assertAlmostEqual(1.6, box.primitive_poses[0].position.x)
@@ -278,8 +278,16 @@ class FullRobotManipulationTest(unittest.TestCase):
             result.header.stamp = rospy.Time.from_sec(1.)
             return result
         self.owner._tf_buffer.lookup_transform.side_effect = stale
-        with self.assertRaisesRegex(demo.DemoError, "stale"):
-            self.update_target()
+        before = copy.deepcopy(self.scene)
+        wall = [100.0]
+        def advance_wall(duration):
+            wall[0] += duration
+        with mock.patch.object(demo.time, "monotonic", side_effect=lambda: wall[0]), \
+                mock.patch.object(demo.rospy.rostime, "wallsleep", side_effect=advance_wall):
+            with self.assertRaisesRegex(demo.DemoError, "stale"):
+                self.update_target()
+        self.assertAlmostEqual(.5, wall[0] - 100.0)
+        self.assertEqual(before, self.scene)
 
     def test_preshape_uses_measured_start_and_original_tracking_tolerance(self):
         self.update_target()
