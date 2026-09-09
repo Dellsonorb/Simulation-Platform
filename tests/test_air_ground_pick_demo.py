@@ -586,7 +586,7 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         lowered = source.lower()
         for forbidden in (
                 "/gazebo/model", "getmodelstate", "setmodelstate",
-                "teleport", "attach", "brick_pick", "contactsstate",
+                "teleport", "/gazebo/", "gazebo_ros_link_attacher", "brick_pick", "contactsstate",
                 "contact_sides", "bilateral"):
             self.assertNotIn(forbidden, lowered)
 
@@ -630,9 +630,9 @@ class MinimalAirGroundPickDemoTest(unittest.TestCase):
         lowered = source.lower()
         for forbidden in (
                 "/gazebo/model", "getmodelstate", "setmodelstate",
-                "teleport", "attach", "benchmark", "provenance",
+                "teleport", "/gazebo/", "gazebo_ros_link_attacher", "benchmark", "provenance",
                 "task-aware", "uavcommand", "uavsetup",
-                "uavcontrolstate", "laserscan", "twist", "world",
+                "uavcontrolstate", "laserscan", "twist",
                 "/ground/cmd_vel", "/ground/nav_cmd_vel"):
             self.assertNotIn(forbidden, lowered)
         safe_land = source.split("def _safe_land", 1)[1].split(

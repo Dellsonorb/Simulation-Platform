@@ -1,0 +1,7 @@
+<library path="lib/libground_integrated_velocity_robot_hw_sim">
+  <class name="ground_manipulator_runtime/IntegratedVelocityRobotHWSim"
+         type="ground_manipulator_runtime::IntegratedVelocityRobotHWSim"
+         base_class_type="gazebo_ros_control::RobotHWSim">
+    <description>Stock hardware simulation with opt-in integrated-position interval velocity feedback.</description>
+  </class>
+</library>

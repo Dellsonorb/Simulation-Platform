@@ -8,6 +8,11 @@
 
   <buildtool_depend>catkin</buildtool_depend>
 
+  <depend>gazebo_dev</depend>
+  <depend>gazebo_ros_control</depend>
+  <depend>pluginlib</depend>
+  <depend>roscpp</depend>
+
   <exec_depend>actionlib</exec_depend>
   <exec_depend>actionlib_msgs</exec_depend>
   <exec_depend>aubo_description</exec_depend>
@@ -19,7 +24,6 @@
   <exec_depend>gazebo_msgs</exec_depend>
   <exec_depend>gazebo_plugins</exec_depend>
   <exec_depend>gazebo_ros</exec_depend>
-  <exec_depend>gazebo_ros_control</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>joint_state_controller</exec_depend>
   <exec_depend>position_controllers</exec_depend>
@@ -33,4 +37,7 @@
   <exec_depend>xacro</exec_depend>
 
   <test_depend>rostest</test_depend>
+  <export>
+    <gazebo_ros_control plugin="${prefix}/robot_hw_sim_plugins.xml"/>
+  </export>
 </package>

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run one natural air observation, ground approach, grasp, and lift."""
 
+import copy
 import json
 import math
 import sys
@@ -16,8 +17,13 @@ from control_msgs.msg import (
 from geometry_msgs.msg import PointStamped, PoseStamped
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 import moveit_commander
-from moveit_msgs.msg import RobotState
-from moveit_msgs.srv import GetCartesianPath, GetCartesianPathRequest
+from moveit_msgs.msg import PlanningSceneComponents, RobotState
+from moveit_msgs.srv import (
+    ApplyPlanningScene, ApplyPlanningSceneRequest,
+    GetCartesianPath, GetCartesianPathRequest,
+    GetPlanningScene, GetPlanningSceneRequest,
+    GetStateValidity, GetStateValidityRequest,
+)
 from prometheus_msgs.msg import UAVState
 import rospy
 from sensor_msgs.msg import JointState
@@ -48,6 +54,7 @@ from air_ground_pick_demo.grasp import (
     generate_top_down_grasp,
     zero_terminal_motion,
 )
+from air_ground_pick_demo import manipulation_scene
 
 
 class DemoError(RuntimeError):
@@ -69,6 +76,9 @@ class AirGroundPickDemo:
         self._ground_target_pose = None
         self._ground_surface_cue = None
         self._ground_observation_mode = rospy.get_param('~ground_observation_mode', 'legacy_pregrasp')
+        self._full_robot_manipulation = rospy.get_param("~full_robot_manipulation", False)
+        if type(self._full_robot_manipulation) is not bool:
+            raise DemoError("~full_robot_manipulation must be boolean")
         self._joint_state = None
         self._grasp_confirmed = False
         self._uav_state_received = None
@@ -262,6 +272,10 @@ class AirGroundPickDemo:
 
         self._move_group = None
         self._planning_scene = None
+        self._scene_robot = None
+        self._get_scene = None
+        self._apply_scene = None
+        self._state_validity = None
         self._tf_buffer = tf2_ros.Buffer(cache_time=rospy.Duration(10.0))
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer)
 
@@ -701,6 +715,21 @@ class AirGroundPickDemo:
         positions = self._joint_position_map(message)
         if not set(self._observation_joint_names).issubset(positions):
             raise DemoError("ground arm joint state is incomplete")
+        if getattr(self, "_full_robot_manipulation", False):
+            if (not 0.0 <= time.monotonic() - received <= maximum_age or
+                    not transform_is_fresh(message.header.stamp.to_sec(),
+                                           rospy.Time.now().to_sec(), maximum_age)):
+                raise DemoError("ground joint state is stale")
+            scene = self._get_manipulation_scene()
+            # Send independent measured joints only; MoveIt recomputes mimic
+            # joints, including when a gripper sweep changes its master joint.
+            if not set(self._scene_active_joints).issubset(positions):
+                raise DemoError("full robot joint state is incomplete")
+            measured = JointState()
+            measured.header = copy.deepcopy(message.header)
+            measured.name = list(self._scene_active_joints)
+            measured.position = [positions[name] for name in measured.name]
+            return manipulation_scene.planning_start_state(scene.robot_state, measured)
         state = RobotState()
         state.joint_state.header.stamp = rospy.Time.now()
         state.joint_state.name = list(message.name)
@@ -748,10 +777,31 @@ class AirGroundPickDemo:
 
     def _execute_trajectory(
             self, client, names, positions, duration, timeout, label,
-            accept_grasp_stall=False):
+            accept_grasp_stall=False, start_from_feedback=False):
         if not client.wait_for_server(rospy.Duration(timeout)):
             raise DemoError(label + " controller action is unavailable")
-        client.send_goal(self._trajectory_goal(names, positions, duration))
+        goal = self._trajectory_goal(names, positions, duration)
+        if start_from_feedback:
+            message, received = self._manipulation_snapshot()[2:4]
+            if (message is None or received is None or
+                    not 0.0 <= time.monotonic() - received <= 1.0):
+                raise DemoError(label + " measured start state is stale")
+            measured_positions = self._joint_position_map(message)
+            if (len(message.velocity) != len(message.name) or
+                    any(message.name.count(name) != 1 for name in names)):
+                raise DemoError(label + " measured start state is incomplete")
+            measured_velocities = dict(zip(message.name, message.velocity))
+            start = JointTrajectoryPoint()
+            start.positions = [measured_positions[name] for name in names]
+            start.velocities = [float(measured_velocities[name]) for name in names]
+            if not all(math.isfinite(value) for value in start.velocities):
+                raise DemoError(label + " measured start velocity is nonfinite")
+            start.time_from_start = rospy.Duration(0.0)
+            # A contact-stalled close may leave the controller's desired
+            # position at the unreachable closure goal. Seed opening from
+            # measured state, retaining the future stamp so t=0 is not dropped.
+            goal.trajectory.points.insert(0, start)
+        client.send_goal(goal)
         if not client.wait_for_result(rospy.Duration(timeout)):
             client.cancel_goal()
             raise DemoError(label + " controller action timed out")
@@ -773,10 +823,13 @@ class AirGroundPickDemo:
             (label, state, client.get_goal_status_text()))
 
     def _open_gripper(self):
+        if getattr(self, "_full_robot_manipulation", False):
+            self._check_gripper_sweep(self._gripper_open_position, "AG95 opening")
         self._execute_trajectory(
             self._gripper_client, ("left_outer_knuckle_joint",),
             (self._gripper_open_position,), self._gripper_motion_time,
-            self._gripper_action_timeout, "AG95 open")
+            self._gripper_action_timeout, "AG95 open",
+            start_from_feedback=True)
         positions = self._wait_joint_target(
             ("left_outer_knuckle_joint",),
             (self._gripper_open_position,), self._gripper_joint_tolerance,
@@ -789,11 +842,25 @@ class AirGroundPickDemo:
         return opening
 
     def _move_to_ground_observation(self):
-        self._execute_trajectory(
-            self._arm_client, self._observation_joint_names,
-            self._observation_joint_positions,
-            self._observation_joint_duration, self._arm_action_timeout,
-            "AUBO observation")
+        if getattr(self, "_full_robot_manipulation", False):
+            group = self._initialize_moveit()
+            group.set_start_state(self._check_full_robot_state("observation start"))
+            group.set_joint_value_target(dict(zip(
+                self._observation_joint_names, self._observation_joint_positions)))
+            planned = group.plan()
+            success = bool(planned[0]) if isinstance(planned, tuple) else True
+            trajectory = planned[1] if isinstance(planned, tuple) else planned
+            if not success or not trajectory.joint_trajectory.points:
+                raise DemoError("collision-aware joint observation planning failed")
+            if not group.execute(trajectory, wait=True):
+                raise DemoError("collision-aware joint observation execution failed")
+            group.stop()
+        else:
+            self._execute_trajectory(
+                self._arm_client, self._observation_joint_names,
+                self._observation_joint_positions,
+                self._observation_joint_duration, self._arm_action_timeout,
+                "AUBO observation")
         self._wait_joint_target(
             self._observation_joint_names,
             self._observation_joint_positions,
@@ -870,6 +937,16 @@ class AirGroundPickDemo:
         return self._wait_for_ground_target(opening)
 
     def _observe_ground_target(self, aerial_target):
+        if getattr(self, "_full_robot_manipulation", False):
+            # This tuple is the accepted aerial estimate, not the partial
+            # surface cue. The timestamp here is the planning reference time.
+            accepted = PoseStamped()
+            accepted.header.frame_id = self._map_frame
+            accepted.header.stamp = rospy.Time.now()
+            accepted.pose.position.x, accepted.pose.position.y, accepted.pose.position.z = aerial_target[:3]
+            (accepted.pose.orientation.x, accepted.pose.orientation.y,
+             accepted.pose.orientation.z, accepted.pose.orientation.w) = self._quaternion_from_yaw(aerial_target[3])
+            self._update_manipulation_target(accepted, source="accepted_aerial")
         if self._placement_mode == "rm4d":
             return self._observe_ground_target_rm4d(aerial_target)
         return self._observe_ground_target_standoff(aerial_target)
@@ -933,6 +1010,162 @@ class AirGroundPickDemo:
         self._planning_scene.add_plane("air_ground_floor", floor)
         self._move_group = group
         return group
+
+    def _get_manipulation_scene(self):
+        if self._get_scene is None:
+            self._scene_robot = moveit_commander.RobotCommander()
+            self._scene_robot_links = tuple(self._scene_robot.get_link_names())
+            self._scene_active_joints = tuple(self._scene_robot.get_active_joint_names())
+            try:
+                for name in ("/get_planning_scene", "/apply_planning_scene", "/check_state_validity"):
+                    rospy.wait_for_service(name, timeout=self._moveit_server_timeout)
+                self._get_scene = rospy.ServiceProxy("/get_planning_scene", GetPlanningScene)
+                self._apply_scene = rospy.ServiceProxy("/apply_planning_scene", ApplyPlanningScene)
+                self._state_validity = rospy.ServiceProxy("/check_state_validity", GetStateValidity)
+            except (rospy.ROSException, rospy.ServiceException) as error:
+                raise DemoError("full manipulation scene services unavailable: %s" % error) from error
+        request = GetPlanningSceneRequest()
+        request.components.components = (
+            PlanningSceneComponents.SCENE_SETTINGS | PlanningSceneComponents.ROBOT_STATE |
+            PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS |
+            PlanningSceneComponents.WORLD_OBJECT_NAMES | PlanningSceneComponents.WORLD_OBJECT_GEOMETRY |
+            PlanningSceneComponents.TRANSFORMS | PlanningSceneComponents.ALLOWED_COLLISION_MATRIX |
+            PlanningSceneComponents.OCTOMAP | PlanningSceneComponents.LINK_PADDING_AND_SCALING |
+            PlanningSceneComponents.OBJECT_COLORS)
+        try:
+            return self._get_scene(request).scene
+        except (rospy.ROSException, rospy.ServiceException) as error:
+            raise DemoError("full manipulation scene read failed: %s" % error) from error
+
+    def _apply_manipulation_scene(self, change):
+        try:
+            response = self._apply_scene(ApplyPlanningSceneRequest(scene=change))
+        except (rospy.ROSException, rospy.ServiceException) as error:
+            raise DemoError("manipulation scene apply failed: %s" % error) from error
+        if not response.success:
+            raise DemoError("manipulation scene apply was rejected")
+
+    def _update_manipulation_target(self, accepted_pose, source="accepted"):
+        group = self._initialize_moveit()
+        planning_frame = group.get_planning_frame()
+        if accepted_pose.header.frame_id == planning_frame:
+            planning_pose = copy.deepcopy(accepted_pose)
+        else:
+            transform = self._tf_buffer.lookup_transform(
+                planning_frame, accepted_pose.header.frame_id, rospy.Time(0), rospy.Duration(.5))
+            if not transform_is_fresh(transform.header.stamp.to_sec(), rospy.Time.now().to_sec(),
+                                      self._ground_tf_max_age):
+                raise DemoError("target planning-frame transform is stale")
+            planning_pose = do_transform_pose(accepted_pose, transform)
+        scene = self._get_manipulation_scene()
+        try:
+            change = manipulation_scene.world_target_diff(
+                scene, planning_pose, self._target_size, self._scene_robot_links)
+        except manipulation_scene.SceneError as error:
+            raise DemoError("perceived target scene update failed: %s" % error) from error
+        self._apply_manipulation_scene(change)
+        p, q = planning_pose.pose.position, planning_pose.pose.orientation
+        self._publish_status(
+            "GROUND_MANIPULATION_SCENE", source=source, frame=planning_pose.header.frame_id,
+            target_pose=[p.x, p.y, p.z, q.x, q.y, q.z, q.w], target_size=list(self._target_size),
+            object_id=manipulation_scene.TARGET_ID, target_contacts_allowed=False)
+
+    def _set_manipulation_contact(self, enabled):
+        scene = self._get_manipulation_scene()
+        try:
+            change = manipulation_scene.finger_contact_diff(scene, self._scene_robot_links, enabled)
+        except manipulation_scene.SceneError as error:
+            raise DemoError("grasp contact scene update failed: %s" % error) from error
+        self._apply_manipulation_scene(change)
+
+    def _check_full_robot_state(self, label, state=None, require_payload=False):
+        state = self._robot_state_from_joint_feedback() if state is None else state
+        if require_payload and not any(
+                item.object.id == manipulation_scene.TARGET_ID for item in state.attached_collision_objects):
+            raise DemoError(label + " perceived payload is missing from robot state")
+        request = GetStateValidityRequest()
+        request.robot_state = state
+        request.group_name = ""  # Check the entire robot, not just manipulator links.
+        try:
+            response = self._state_validity(request)
+        except (rospy.ROSException, rospy.ServiceException) as error:
+            raise DemoError(label + " full robot state validity unavailable: " + str(error)) from error
+        if not response.valid:
+            contacts = ["%s/%s" % (c.contact_body_1, c.contact_body_2) for c in response.contacts]
+            raise DemoError("%s full robot state invalid; collisions=%s" % (label, contacts))
+        return state
+
+    def _check_gripper_sweep(self, final_joint, label):
+        state = self._robot_state_from_joint_feedback()
+        names = state.joint_state.name
+        index = names.index("left_outer_knuckle_joint")
+        start = state.joint_state.position[index]
+        conservative_jaw_opening(start, self._maximum_gripper_opening, self._maximum_gripper_joint)
+        conservative_jaw_opening(final_joint, self._maximum_gripper_opening, self._maximum_gripper_joint)
+        # Two 55-mm linkage lengths give a conservative 110-mm sweep radius.
+        # Bound sample displacement using the existing Cartesian spatial step;
+        # these are discrete full-model checks, not a continuous-motion proof.
+        intervals = max(1, int(math.ceil(abs(final_joint-start) * .110 / self._cartesian_eef_step)))
+        for index_in_sweep in range(intervals + 1):
+            sample = copy.deepcopy(state)
+            sample.joint_state.position[index] = start + (final_joint-start) * index_in_sweep/intervals
+            self._check_full_robot_state(label, sample)
+        return intervals + 1
+
+    def _preshape_gripper(self):
+        try:
+            preshape = manipulation_scene.required_opening_preshape(
+                self._target_size, self._maximum_gripper_opening, self._maximum_gripper_joint,
+                self._opening_margin, self._gripper_joint_tolerance)
+        except manipulation_scene.SceneError as error:
+            raise DemoError("target-sized gripper preshape is invalid: %s" % error) from error
+        self._check_gripper_sweep(preshape.command_position, "AG95 preshape")
+        self._execute_trajectory(
+            self._gripper_client, ("left_outer_knuckle_joint",), (preshape.command_position,),
+            self._gripper_motion_time, self._gripper_action_timeout, "AG95 preshape",
+            start_from_feedback=True)
+        self._wait_joint_target(
+            ("left_outer_knuckle_joint",), (preshape.command_position,), self._gripper_joint_tolerance,
+            self._gripper_action_timeout, "AG95 preshape")
+        measured = self._check_full_robot_state("AG95 measured preshape")
+        positions = dict(zip(measured.joint_state.name, measured.joint_state.position))
+        opening = conservative_jaw_opening(positions["left_outer_knuckle_joint"],
+                                           self._maximum_gripper_opening, self._maximum_gripper_joint)
+        if opening <= self._feasibility.required_opening:
+            raise DemoError("measured AG95 opening is too small for target")
+        self._publish_status(
+            "GROUND_GRIPPER_PRESHAPE", commanded_joint=preshape.command_position,
+            measured_joint=positions["left_outer_knuckle_joint"], measured_opening=opening,
+            required_opening=preshape.required_opening, tracking_tolerance=self._gripper_joint_tolerance)
+        return opening
+
+    def _attach_manipulation_target(self):
+        frame = self._move_group.get_planning_frame()
+        transform = self._tf_buffer.lookup_transform(
+            frame, self._end_effector_link, rospy.Time(0), rospy.Duration(.5))
+        if not transform_is_fresh(transform.header.stamp.to_sec(), rospy.Time.now().to_sec(),
+                                  self._ground_tf_max_age):
+            raise DemoError("confirmed grasp TCP transform is stale")
+        measured = PoseStamped()
+        measured.header = copy.deepcopy(transform.header)
+        p = transform.transform.translation
+        measured.pose.position.x, measured.pose.position.y, measured.pose.position.z = p.x, p.y, p.z
+        measured.pose.orientation = copy.deepcopy(transform.transform.rotation)
+        scene = self._get_manipulation_scene()
+        try:
+            change = manipulation_scene.attach_target_diff(
+                scene, measured, self._end_effector_link, self._scene_robot_links,
+                self._grasp_confirmation_current())
+        except manipulation_scene.SceneError as error:
+            raise DemoError("confirmed grasp scene update failed: %s" % error) from error
+        self._apply_manipulation_scene(change)
+        self._check_full_robot_state("confirmed grasp", require_payload=True)
+        self._publish_status(
+            "GROUND_PAYLOAD_MODELED", object_id=manipulation_scene.TARGET_ID,
+            link=self._end_effector_link, frame=frame, measurement_stamp=measured.header.stamp.to_sec(),
+            measured_tcp=[p.x, p.y, p.z, measured.pose.orientation.x, measured.pose.orientation.y,
+                          measured.pose.orientation.z, measured.pose.orientation.w],
+            touch_links=list(manipulation_scene.FINGER_LINKS))
 
     @staticmethod
     def _quaternion_error(first, second):
@@ -999,6 +1232,12 @@ class AirGroundPickDemo:
         request.start_state.joint_state.position = list(
             joint_trajectory.points[-1].positions)
         request.start_state.is_diff = True
+        if getattr(self, "_full_robot_manipulation", False):
+            current = self._robot_state_from_joint_feedback()
+            endpoint = dict(zip(joint_trajectory.joint_names, joint_trajectory.points[-1].positions))
+            current.joint_state.position = [endpoint.get(name, position) for name, position in
+                                            zip(current.joint_state.name, current.joint_state.position)]
+            request.start_state = current
         request.group_name = self._move_group_name
         request.link_name = self._end_effector_link
         request.waypoints = [continuation.pose]
@@ -1016,7 +1255,10 @@ class AirGroundPickDemo:
             rospy.wait_for_service(
                 "/compute_cartesian_path", timeout=self._moveit_server_timeout)
         for _attempt in range(attempts):
-            group.set_start_state_to_current_state()
+            if getattr(self, "_full_robot_manipulation", False):
+                group.set_start_state(self._robot_state_from_joint_feedback())
+            else:
+                group.set_start_state_to_current_state()
             group.set_pose_target(target, self._end_effector_link)
             planned = group.plan()
             success = bool(planned[0]) if isinstance(planned, tuple) else True
@@ -1047,6 +1289,9 @@ class AirGroundPickDemo:
 
     def _execute_cartesian(self, target, label):
         group = self._move_group
+        if getattr(self, "_full_robot_manipulation", False):
+            start = self._check_full_robot_state(label + " start", require_payload=label == "lift")
+            group.set_start_state(start)
         trajectory, fraction = group.compute_cartesian_path(
             [target.pose], self._cartesian_eef_step, True)
         if (not math.isfinite(fraction) or
@@ -1094,22 +1339,63 @@ class AirGroundPickDemo:
             self._wait_step()
 
     def _close_gripper(self):
-        self._execute_trajectory(
-            self._gripper_client, ("left_outer_knuckle_joint",),
-            (self._gripper_closed_position,), self._gripper_motion_time,
-            self._gripper_action_timeout, "AG95 close",
-            accept_grasp_stall=True)
-        self._wait_grasp_confirmation()
-        positions = self._current_joint_positions()
-        if positions.get("left_outer_knuckle_joint", -math.inf) < \
-                self._minimum_gripper_closed_joint:
-            raise DemoError("AG95 did not close around the target")
+        full = getattr(self, "_full_robot_manipulation", False)
+        try:
+            if full:
+                self._set_manipulation_contact(True)
+                # Validate up to physical pad contact, not unreachable free
+                # closure at the controller's unchanged 0.70-rad force goal.
+                geometry = manipulation_scene.ag95_contact_geometry(
+                    self._target_size, self._maximum_gripper_opening,
+                    self._maximum_gripper_joint, self._finger_pad_lower_edge_offset)
+                contact_joint = geometry.q_contact
+                checked_states = self._check_gripper_sweep(contact_joint, "AG95 physical closure")
+                self._publish_status(
+                    "GROUND_GRASP_GEOMETRY", contact_joint=contact_joint, checked_states=checked_states,
+                    commanded_closed_joint=self._gripper_closed_position, continuous_clearance_proven=False)
+            self._execute_trajectory(
+                self._gripper_client, ("left_outer_knuckle_joint",),
+                (self._gripper_closed_position,), self._gripper_motion_time,
+                self._gripper_action_timeout, "AG95 close",
+                accept_grasp_stall=True)
+            self._wait_grasp_confirmation()
+            positions = self._current_joint_positions()
+            if positions.get("left_outer_knuckle_joint", -math.inf) < \
+                    self._minimum_gripper_closed_joint:
+                raise DemoError("AG95 did not close around the target")
+            if full:
+                self._attach_manipulation_target()
+        except Exception as error:
+            if full:
+                try:
+                    scene = self._get_manipulation_scene()
+                    # Never remove a retained payload after a later error. Only a
+                    # still-world target can have abandoned-grasp exemptions reset.
+                    if (any(o.id == manipulation_scene.TARGET_ID for o in scene.world.collision_objects) and
+                            not any(o.object.id == manipulation_scene.TARGET_ID
+                                    for o in scene.robot_state.attached_collision_objects)):
+                        self._set_manipulation_contact(False)
+                except Exception as cleanup_error:
+                    raise DemoError("%s; grasp contact cleanup failed: %s" % (error, cleanup_error)) from error
+            raise
+
+    def _generate_ground_grasp(self, target):
+        """Ground refinement only; aerial RM4D queries retain legacy geometry."""
+        pad_edge = self._finger_pad_lower_edge_offset
+        if getattr(self, "_full_robot_manipulation", False):
+            try:
+                pad_edge = manipulation_scene.ag95_contact_geometry(
+                    self._target_size, self._maximum_gripper_opening,
+                    self._maximum_gripper_joint, pad_edge).pad_edge
+            except manipulation_scene.SceneError as error:
+                raise DemoError("Ground contact geometry is invalid: %s" % error) from error
+        return generate_top_down_grasp(
+            target, self._target_size, self._pregrasp_height,
+            self._lift_height, pad_edge,
+            self._contact_overlap, self._surface_clearance)
 
     def _pick_and_lift(self, sensor_pose, target):
-        generated = generate_top_down_grasp(
-            target, self._target_size, self._pregrasp_height,
-            self._lift_height, self._finger_pad_lower_edge_offset,
-            self._contact_overlap, self._surface_clearance)
+        generated = self._generate_ground_grasp(target)
         group = self._initialize_moveit()
         planning_frame = group.get_planning_frame()
         messages = tuple(
@@ -1119,6 +1405,17 @@ class AirGroundPickDemo:
                 planning_frame)
             for pose in (generated.pregrasp, generated.grasp, generated.lift))
         pregrasp, grasp, lift = messages
+        if getattr(self, "_full_robot_manipulation", False):
+            geometry = manipulation_scene.ag95_contact_geometry(
+                self._target_size, self._maximum_gripper_opening,
+                self._maximum_gripper_joint, self._finger_pad_lower_edge_offset)
+            self._publish_status(
+                "GROUND_GRASP_CALIBRATION", contact_joint=geometry.q_contact,
+                open_pad_edge=self._finger_pad_lower_edge_offset, contact_pad_edge=geometry.pad_edge,
+                pad_down_shift=geometry.delta, contact_overlap=self._contact_overlap,
+                grasp_tcp_map_z=generated.grasp.position[2])
+            self._update_manipulation_target(sensor_pose, source="accepted_refined")
+            self._preshape_gripper()
         self._publish_status("PREGRASP")
         self._execute_pregrasp(pregrasp)
         self._publish_status("GRASP")
