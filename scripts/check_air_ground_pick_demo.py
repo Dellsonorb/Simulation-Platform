@@ -199,8 +199,10 @@ class DemoMonitor:
         self._target_model = target_model
         self._lock = threading.Lock()
         self.events = []
-        self.air_observations = deque(maxlen=5000)
-        self.ground_observations = deque(maxlen=5000)
+        # Keep stamp/frame evidence for this timeout-bounded run: final LIFT
+        # validation still matches the original handoff observations.
+        self.air_observations = deque()
+        self.ground_observations = deque()
         # Retain state transitions, not every 50 Hz sample. RM4D planning can
         # make the post-landing ground phase longer than the old sample window
         # and must not erase the already observed armed interval.
